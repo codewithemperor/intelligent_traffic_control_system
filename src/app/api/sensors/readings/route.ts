@@ -31,8 +31,29 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sensorId, value, vehicleCount, avgSpeed } = body;
+    const { sensorId, value, vehicleCount, avgSpeed, action } = body;
 
+    // Handle vehicle movement simulation
+    if (action === 'simulate_movement') {
+      const { DataGenerator } = await import('@/lib/data-generator');
+      
+      try {
+        await DataGenerator.simulateVehicleMovement();
+        
+        return NextResponse.json({
+          message: 'Vehicle movement simulation completed',
+          movedVehicles: 'processed'
+        });
+      } catch (error) {
+        console.error('Error in vehicle movement simulation:', error);
+        return NextResponse.json(
+          { error: 'Failed to simulate vehicle movement' },
+          { status: 500 }
+        );
+      }
+    }
+
+    // Handle regular sensor reading creation
     if (!sensorId || value === undefined) {
       return NextResponse.json(
         { error: 'SensorId and value are required' },
@@ -92,9 +113,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(reading, { status: 201 });
   } catch (error) {
-    console.error('Error creating sensor reading:', error);
+    console.error('Error in sensor readings POST:', error);
     return NextResponse.json(
-      { error: 'Failed to create sensor reading' },
+      { error: 'Failed to process request' },
       { status: 500 }
     );
   }

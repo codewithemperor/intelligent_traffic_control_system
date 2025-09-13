@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [simulationInterval, setSimulationInterval] = useState<NodeJS.Timeout | null>(null);
   const [vehicleInterval, setVehicleInterval] = useState<NodeJS.Timeout | null>(null);
+  const [vehicleMovementInterval, setVehicleMovementInterval] = useState<NodeJS.Timeout | null>(null);
 
   const { data: trafficData, loading, error, refetch } = useTrafficData();
   const { socket, connected } = useWebSocket();
@@ -155,6 +156,32 @@ export default function Dashboard() {
 
       setVehicleInterval(vehicleGenInterval);
 
+      // Start vehicle movement simulation
+      const vehicleMovementInterval = setInterval(async () => {
+        try {
+          const response = await fetch('/api/sensors/readings', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              action: 'simulate_movement'
+            }),
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log(`Vehicle movement processed: ${result.movedVehicles || 0} vehicles moved`);
+            refetch(); // Refresh data
+          }
+        } catch (error) {
+          console.error('Error in vehicle movement:', error);
+        }
+      }, 3000); // Every 3 seconds
+
+      // Store the vehicle movement interval
+      setVehicleMovementInterval(vehicleMovementInterval);
+
     } catch (error) {
       console.error('Error starting simulation:', error);
       setIsSimulationRunning(false);
@@ -173,6 +200,11 @@ export default function Dashboard() {
     if (vehicleInterval) {
       clearInterval(vehicleInterval);
       setVehicleInterval(null);
+    }
+
+    if (vehicleMovementInterval) {
+      clearInterval(vehicleMovementInterval);
+      setVehicleMovementInterval(null);
     }
     
     // Add system alert

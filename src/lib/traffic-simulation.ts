@@ -4,6 +4,7 @@
 class TrafficSimulationService {
   private intervalId: NodeJS.Timeout | null = null;
   private vehicleIntervalId: NodeJS.Timeout | null = null;
+  private vehicleMovementIntervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
 
   async startSimulation() {
@@ -53,6 +54,28 @@ class TrafficSimulationService {
       }
     }, 5000); // Generate every 5 seconds
 
+    // Start vehicle movement simulation - every 3 seconds
+    this.vehicleMovementIntervalId = setInterval(async () => {
+      try {
+        const response = await fetch('/api/sensors/readings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            action: 'simulate_movement'
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log(`🚙 Vehicle movement processed: ${result.movedVehicles || 0} vehicles moved`);
+        }
+      } catch (error) {
+        console.error('Error in vehicle movement:', error);
+      }
+    }, 3000); // Process every 3 seconds
+
     console.log('✅ Traffic simulation started successfully');
   }
 
@@ -69,6 +92,11 @@ class TrafficSimulationService {
     if (this.vehicleIntervalId) {
       clearInterval(this.vehicleIntervalId);
       this.vehicleIntervalId = null;
+    }
+
+    if (this.vehicleMovementIntervalId) {
+      clearInterval(this.vehicleMovementIntervalId);
+      this.vehicleMovementIntervalId = null;
     }
 
     this.isRunning = false;

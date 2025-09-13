@@ -53,12 +53,12 @@ export class TrafficAlgorithms {
     
     // Calculate green time based on vehicle count (user's requirement)
     // Base green time + additional time based on vehicle count
-    const baseGreenTime = 15; // Minimum green time
-    const vehicleTimeMultiplier = 2; // 2 seconds per vehicle
+    const baseGreenTime = 10; // Minimum green time
+    const vehicleTimeMultiplier = 1; // 2 seconds per vehicle
     const calculatedGreenTime = baseGreenTime + (vehicleCount * vehicleTimeMultiplier);
     
     // Cap the green time to prevent excessively long cycles
-    timing.green = Math.min(calculatedGreenTime, 60); // Max 60 seconds
+    timing.green = Math.min(calculatedGreenTime, 30); // Max 90 seconds
     timing.red = Math.max(30 - (vehicleCount * 0.5), 15); // Reduce red time for busy roads, min 15s
     timing.cycle = timing.red + timing.yellow + timing.green;
     
@@ -87,7 +87,7 @@ export class TrafficAlgorithms {
   }
 
   /**
-   * Smart intersection coordination - ensures at least one green light, prioritizes roads with more vehicles
+   * Smart intersection coordination - cycles through roads sequentially with timing based on vehicle count
    */
   static coordinateIntersection(intersection: any): { [lightId: string]: AlgorithmResult } {
     const results: { [lightId: string]: AlgorithmResult } = {};
@@ -95,53 +95,158 @@ export class TrafficAlgorithms {
     
     if (trafficLights.length === 0) return results;
     
-    // Sort traffic lights by vehicle count (descending) - busiest road gets priority
-    const sortedLights = trafficLights.sort((a, b) => 
-      (b.road?.vehicleCount || 0) - (a.road?.vehicleCount || 0)
-    );
+    // Find which traffic light is currently GREEN (should be only one)
+    const currentGreenLight = trafficLights.find(light => light.status === 'GREEN');
+    const redLights = trafficLights.filter(light => light.status !== 'GREEN');
     
-    // Ensure at least one light is green - the busiest road
-    const busiestLight = sortedLights[0];
-    const otherLights = sortedLights.slice(1);
-    
-    // Set the busiest road to GREEN
-    const busiestVehicleCount = busiestLight.road?.vehicleCount || 0;
-    const busiestCongestion = busiestLight.road?.congestionLevel || 0;
-    
-    // Calculate green time based on vehicle count (minimum 15s, maximum 60s)
-    const baseGreenTime = 15;
-    const vehicleTimeMultiplier = 2; // 2 seconds per vehicle
-    const calculatedGreenTime = Math.min(baseGreenTime + (busiestVehicleCount * vehicleTimeMultiplier), 60);
-    
-    results[busiestLight.id] = {
-      newStatus: Status.GREEN,
-      timing: {
-        green: calculatedGreenTime,
-        yellow: 5,
-        red: 30, // Other roads will be red for this duration
-        cycle: calculatedGreenTime + 5 + 30
-      },
-      reason: `Priority green - ${busiestVehicleCount} vehicles, ${calculatedGreenTime}s green time`,
-      efficiency: Math.max(0, 1 - busiestCongestion),
-      waitTime: 0
-    };
-    
-    // Set all other roads to RED
-    otherLights.forEach(light => {
-      const vehicleCount = light.road?.vehicleCount || 0;
-      const congestion = light.road?.congestionLevel || 0;
+    // If no green light, find the road with most vehicles and make it green
+    if (!currentGreenLight) {
+      // Sort by vehicle count (descending) - busiest road gets priority
+      const sortedLights = trafficLights.sort((a, b) => 
+        (b.road?.vehicleCount || 0) - (a.road?.vehicleCount || 0)
+      );
       
-      results[light.id] = {
-        newStatus: Status.RED,
+      const nextGreenLight = sortedLights[0];
+      const otherLights = sortedLights.slice(1);
+      
+      // Set the next road to GREEN
+      const vehicleCount = nextGreenLight.road?.vehicleCount || 0;
+      const congestion = nextGreenLight.road?.congestionLevel || 0;
+      
+      // Calculate green time based on vehicle count (minimum 15s, maximum 90s)
+      const baseGreenTime = 15;
+      const vehicleTimeMultiplier = 2; // 2 seconds per vehicle
+      const calculatedGreenTime = Math.min(baseGreenTime + (vehicleCount * vehicleTimeMultiplier), 90);
+      
+      results[nextGreenLight.id] = {
+        newStatus: Status.GREEN,
         timing: {
-          green: 15, // Default green time for when it becomes their turn
+          green: calculatedGreenTime,
           yellow: 5,
-          red: calculatedGreenTime, // Wait for the busy road to finish
-          cycle: calculatedGreenTime + 5 + 15
+          red: 30, // Will be updated when it's their turn
+          cycle: calculatedGreenTime + 5 + 30
         },
-        reason: `Wait priority - ${vehicleCount} vehicles waiting`,
+        reason: `Priority green - ${vehicleCount} vehicles, ${calculatedGreenTime}s green time`,
         efficiency: Math.max(0, 1 - congestion),
-        waitTime: calculatedGreenTime // Estimated wait time
+        waitTime: 0
+      };
+      
+      // Set all other roads to RED
+      otherLights.forEach(light => {
+        const lightVehicleCount = light.road?.vehicleCount || 0;
+        const lightCongestion = light.road?.congestionLevel || 0;
+        
+        results[light.id] = {
+          newStatus: Status.RED,
+          timing: {
+            green: 15, // Default green time for when it becomes their turn
+            yellow: 5,
+            red: calculatedGreenTime + 5, // Wait for green + yellow
+            cycle: calculatedGreenTime + 5 + 15
+          },
+          reason: `Waiting for turn - ${lightVehicleCount} vehicles waiting`,
+          efficiency: Math.max(0, 1 - lightCongestion),
+          waitTime: calculatedGreenTime + 5 // Estimated wait time
+        };
+      });
+      
+      return results;
+    }
+    
+    // If we have a current green light, check if it's time to change
+    const currentTime = new Date();
+    const elapsed = (currentTime.getTime() - currentGreenLight.lastChanged.getTime()) / 1000;
+    const timing = currentGreenLight.timing as any;
+    
+    // Check if green light should turn yellow
+    if (elapsed >= timing.green) {
+      // Current green light turns yellow
+      results[currentGreenLight.id] = {
+        newStatus: Status.YELLOW,
+        timing: timing,
+        reason: `Green time expired - turning yellow`
+      };
+      
+      // All other lights remain red
+      redLights.forEach(light => {
+        results[light.id] = {
+          newStatus: Status.RED,
+          timing: light.timing,
+          reason: `Waiting for current cycle to complete`
+        };
+      });
+      
+      return results;
+    }
+    
+    // Check if yellow light should turn red and cycle to next road
+    if (currentGreenLight.status === Status.YELLOW && elapsed >= timing.green + timing.yellow) {
+      // Current light turns red
+      results[currentGreenLight.id] = {
+        newStatus: Status.RED,
+        timing: timing,
+        reason: `Yellow time expired - turning red`
+      };
+      
+      // Find the next road to turn green (sequential cycling)
+      const currentLightIndex = trafficLights.findIndex(light => light.id === currentGreenLight.id);
+      const nextLightIndex = (currentLightIndex + 1) % trafficLights.length;
+      const nextGreenLight = trafficLights[nextLightIndex];
+      
+      // Set the next road to GREEN
+      const vehicleCount = nextGreenLight.road?.vehicleCount || 0;
+      const congestion = nextGreenLight.road?.congestionLevel || 0;
+      
+      // Calculate green time based on vehicle count (minimum 15s, maximum 90s)
+      const baseGreenTime = 15;
+      const vehicleTimeMultiplier = 2;
+      const calculatedGreenTime = Math.min(baseGreenTime + (vehicleCount * vehicleTimeMultiplier), 90);
+      
+      results[nextGreenLight.id] = {
+        newStatus: Status.GREEN,
+        timing: {
+          green: calculatedGreenTime,
+          yellow: 5,
+          red: 30,
+          cycle: calculatedGreenTime + 5 + 30
+        },
+        reason: `Next in cycle - ${vehicleCount} vehicles, ${calculatedGreenTime}s green time`,
+        efficiency: Math.max(0, 1 - congestion),
+        waitTime: 0
+      };
+      
+      // All other lights remain red
+      const otherLights = trafficLights.filter(light => 
+        light.id !== currentGreenLight.id && light.id !== nextGreenLight.id
+      );
+      
+      otherLights.forEach(light => {
+        const lightVehicleCount = light.road?.vehicleCount || 0;
+        const lightCongestion = light.road?.congestionLevel || 0;
+        
+        results[light.id] = {
+          newStatus: Status.RED,
+          timing: {
+            green: 15,
+            yellow: 5,
+            red: calculatedGreenTime + 5,
+            cycle: calculatedGreenTime + 5 + 15
+          },
+          reason: `Waiting for turn - ${lightVehicleCount} vehicles waiting`,
+          efficiency: Math.max(0, 1 - lightCongestion),
+          waitTime: calculatedGreenTime + 5
+        };
+      });
+      
+      return results;
+    }
+    
+    // If no change needed, return current status
+    trafficLights.forEach(light => {
+      results[light.id] = {
+        newStatus: light.status,
+        timing: light.timing,
+        reason: `No change needed - current cycle continuing`
       };
     });
     
