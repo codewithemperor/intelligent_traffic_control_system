@@ -2,17 +2,25 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Status, TrafficLightProps } from '@/types/traffic';
+import { Status } from '@/types/traffic';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { STATUS_COLORS } from '@/constants/traffic-config';
 
-interface TrafficLightComponentProps extends TrafficLightProps {
+interface TrafficLightProps {
+  id: string;
+  name: string;
+  status: Status;
+  timing: any;
+  vehicleCount: number;
+  isManual?: boolean;
+  onManualOverride?: (id: string, status: Status) => void;
   countdown?: number;
+  compact?: boolean;
 }
 
-export const TrafficLight: React.FC<TrafficLightComponentProps> = ({
+export const TrafficLight: React.FC<TrafficLightProps> = ({
   id,
   name,
   status,
@@ -20,12 +28,14 @@ export const TrafficLight: React.FC<TrafficLightComponentProps> = ({
   vehicleCount,
   isManual = false,
   onManualOverride,
-  countdown = 0
+  countdown = 0,
+  compact = false
 }) => {
   const [isHovered, setIsHovered] = useState(false);
 
-  const getLightClass = (lightStatus: Status) => {
-    const baseClass = "w-16 h-16 rounded-full border-2 border-gray-800 transition-all duration-300";
+  const getLightClass = (lightStatus: Status, compactMode = false) => {
+    const sizeClass = compactMode ? "w-8 h-8" : "w-16 h-16";
+    const baseClass = `${sizeClass} rounded-full border-2 border-gray-800 transition-all duration-300`;
     const activeClass = status === lightStatus 
       ? `${STATUS_COLORS[lightStatus]} shadow-lg scale-110` 
       : "bg-gray-700 opacity-30";
@@ -61,6 +71,80 @@ export const TrafficLight: React.FC<TrafficLightComponentProps> = ({
         return 'secondary';
     }
   };
+
+  if (compact) {
+    return (
+      <div className="flex flex-col items-center space-y-2">
+        {/* Compact Traffic Light */}
+        <div className="traffic-light bg-gradient-to-b from-gray-900 to-gray-800 p-2 rounded-lg shadow-lg border border-gray-700">
+          <div className="space-y-1">
+            {/* Red Light */}
+            <motion.div
+              className={getLightClass(Status.RED, true)}
+              animate={status === Status.RED || status === Status.FLASHING_RED ? {
+                boxShadow: [
+                  "0 0 10px rgba(239, 68, 68, 0.8)",
+                  "0 0 15px rgba(239, 68, 68, 1)",
+                  "0 0 10px rgba(239, 68, 68, 0.8)"
+                ]
+              } : {}}
+              transition={status === Status.FLASHING_RED ? {
+                duration: 1,
+                repeat: Infinity,
+                ease: "easeInOut"
+              } : {}}
+            />
+            
+            {/* Yellow Light */}
+            <motion.div
+              className={getLightClass(Status.YELLOW, true)}
+              animate={status === Status.YELLOW || status === Status.FLASHING_YELLOW ? {
+                boxShadow: [
+                  "0 0 10px rgba(245, 158, 11, 0.8)",
+                  "0 0 15px rgba(245, 158, 11, 1)",
+                  "0 0 10px rgba(245, 158, 11, 0.8)"
+                ]
+              } : {}}
+              transition={status === Status.FLASHING_YELLOW ? {
+                duration: 1,
+                repeat: Infinity,
+                ease: "easeInOut"
+              } : {}}
+            />
+            
+            {/* Green Light */}
+            <motion.div
+              className={getLightClass(Status.GREEN, true)}
+              animate={status === Status.GREEN ? {
+                boxShadow: [
+                  "0 0 10px rgba(34, 197, 94, 0.8)",
+                  "0 0 15px rgba(34, 197, 94, 1)",
+                  "0 0 10px rgba(34, 197, 94, 0.8)"
+                ]
+              } : {}}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Status Badge */}
+        <Badge variant={getStatusColor(status)} className="text-xs font-medium">
+          {getStatusText(status)}
+        </Badge>
+
+        {/* Vehicle Count */}
+        {vehicleCount > 0 && (
+          <div className="text-xs text-gray-600">
+            {vehicleCount} vehicles
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <Card 

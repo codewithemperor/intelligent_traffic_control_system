@@ -5,55 +5,58 @@ import { Status, Algorithm } from '@/types/traffic';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, lightId, status, algorithm, timing } = body;
+    const { action, lightId, status, algorithm, timing, intersectionId } = body;
 
-    if (!action || !lightId) {
+    if (!action) {
       return NextResponse.json(
-        { error: 'Action and lightId are required' },
+        { error: 'Action is required' },
         { status: 400 }
       );
     }
 
-    // Get current traffic light state
-    const currentLight = await db.trafficLight.findUnique({
-      where: { id: lightId },
-      include: {
-        roads: {
-          include: {
-            vehicles: true
-          }
-        }
-      }
-    });
-
-    if (!currentLight) {
-      return NextResponse.json(
-        { error: 'Traffic light not found' },
-        { status: 404 }
-      );
-    }
-
     let updatedLight;
-    const totalVehicles = currentLight.roads.reduce((sum, road) => sum + road.vehicleCount, 0);
+    let updatedIntersection;
 
     switch (action) {
       case 'manual_override':
-        if (!status) {
+        if (!lightId || !status) {
           return NextResponse.json(
-            { error: 'Status is required for manual override' },
+            { error: 'Light ID and status are required for manual override' },
             { status: 400 }
           );
         }
+
+        // Get current traffic light state
+        const currentLight = await db.trafficLight.findUnique({
+          where: { id: lightId },
+          include: {
+            intersection: true,
+            road: {
+              include: {
+                vehicles: true
+              }
+            }
+          }
+        });
+
+        if (!currentLight) {
+          return NextResponse.json(
+            { error: 'Traffic light not found' },
+            { status: 404 }
+          );
+        }
+
+        const totalVehicles = currentLight.road.vehicleCount;
 
         updatedLight = await db.trafficLight.update({
           where: { id: lightId },
           data: {
             status,
-            lastChanged: new Date(),
-            algorithm: Algorithm.EMERGENCY
+            lastChanged: new Date()
           },
           include: {
-            roads: {
+            intersection: true,
+            road: {
               include: {
                 vehicles: true
               }
@@ -64,6 +67,7 @@ export async function POST(request: NextRequest) {
         // Log the manual override
         await db.trafficLog.create({
           data: {
+            intersectionId: currentLight.intersectionId,
             trafficLightId: lightId,
             action: 'MANUAL_OVERRIDE',
             previousState: currentLight.status,
@@ -75,15 +79,27 @@ export async function POST(request: NextRequest) {
 
         break;
 
-      case 'emergency_mode':
-        updatedLight = await db.trafficLight.update({
-          where: { id: lightId },
-          data: {
-            status: Status.GREEN,
-            lastChanged: new Date(),
-            algorithm: Algorithm.EMERGENCY
-          },
+      case 'intersection_emergency':
+        if (!intersectionId) {
+          return NextResponse.json(
+            { error: 'Intersection ID is required for emergency mode' },
+            { status: 400 }
+          );
+        }
+
+        // Get intersection and all its traffic lights
+        const intersection = await db.intersection.findUnique({
+          where: { id: intersectionId },
           include: {
+            trafficLights: {
+              include: {
+                road: {
+                  include: {
+                    vehicles: true
+                  }
+                }
+              }
+            },
             roads: {
               include: {
                 vehicles: true
@@ -92,38 +108,82 @@ export async function POST(request: NextRequest) {
           }
         });
 
-        // Log emergency mode activation
-        await db.trafficLog.create({
+        if (!intersection) {
+          return NextResponse.json(
+            { error: 'Intersection not found' },
+            { status: 404 }
+          );
+        }
+
+        // Set all lights to green for emergency
+        const emergencyUpdate = intersection.trafficLights.map(light => 
+          db.trafficLight.update({
+            where: { id: light.id },
+            data: {
+              status: Status.GREEN,
+              lastChanged: new Date()
+            }
+          })
+        );
+
+        await Promise.all(emergencyUpdate);
+
+        // Update intersection algorithm
+        updatedIntersection = await db.intersection.update({
+          where: { id: intersectionId },
           data: {
-            trafficLightId: lightId,
-            action: 'EMERGENCY',
-            previousState: currentLight.status,
-            newState: Status.GREEN,
-            reason: 'Emergency mode activated',
-            vehicleCount: totalVehicles
+            algorithm: Algorithm.EMERGENCY
+          },
+          include: {
+            trafficLights: {
+              include: {
+                road: {
+                  include: {
+                    vehicles: true
+                  }
+                }
+              }
+            }
           }
         });
 
-        break;
+        // Log emergency mode activation
+        const totalIntersectionVehicles = intersection.roads.reduce((sum, road) => sum + road.vehicleCount, 0);
+        await db.trafficLog.createMany({
+          data: intersection.trafficLights.map(light => ({
+            intersectionId,
+            trafficLightId: light.id,
+            action: 'EMERGENCY',
+            previousState: light.status,
+            newState: Status.GREEN,
+            reason: 'Emergency mode activated',
+            vehicleCount: totalIntersectionVehicles
+          }))
+        });
 
-      case 'change_algorithm':
-        if (!algorithm) {
+        return NextResponse.json(updatedIntersection);
+
+      case 'change_intersection_algorithm':
+        if (!intersectionId || !algorithm) {
           return NextResponse.json(
-            { error: 'Algorithm is required' },
+            { error: 'Intersection ID and algorithm are required' },
             { status: 400 }
           );
         }
 
-        updatedLight = await db.trafficLight.update({
-          where: { id: lightId },
+        updatedIntersection = await db.intersection.update({
+          where: { id: intersectionId },
           data: {
-            algorithm,
-            lastChanged: new Date()
+            algorithm
           },
           include: {
-            roads: {
+            trafficLights: {
               include: {
-                vehicles: true
+                road: {
+                  include: {
+                    vehicles: true
+                  }
+                }
               }
             }
           }
@@ -132,22 +192,42 @@ export async function POST(request: NextRequest) {
         // Log algorithm change
         await db.trafficLog.create({
           data: {
-            trafficLightId: lightId,
+            intersectionId,
+            trafficLightId: updatedIntersection.trafficLights[0]?.id || '',
             action: 'ALGORITHM_CHANGE',
-            previousState: currentLight.status,
-            newState: currentLight.status,
+            previousState: Status.RED,
+            newState: Status.RED,
             reason: `Algorithm changed to ${algorithm}`,
-            vehicleCount: totalVehicles
+            vehicleCount: 0
           }
         });
 
-        break;
+        return NextResponse.json(updatedIntersection);
 
       case 'update_timing':
-        if (!timing) {
+        if (!lightId || !timing) {
           return NextResponse.json(
-            { error: 'Timing is required' },
+            { error: 'Light ID and timing are required' },
             { status: 400 }
+          );
+        }
+
+        const currentTimingLight = await db.trafficLight.findUnique({
+          where: { id: lightId },
+          include: {
+            intersection: true,
+            road: {
+              include: {
+                vehicles: true
+              }
+            }
+          }
+        });
+
+        if (!currentTimingLight) {
+          return NextResponse.json(
+            { error: 'Traffic light not found' },
+            { status: 404 }
           );
         }
 
@@ -158,7 +238,8 @@ export async function POST(request: NextRequest) {
             lastChanged: new Date()
           },
           include: {
-            roads: {
+            intersection: true,
+            road: {
               include: {
                 vehicles: true
               }
@@ -169,54 +250,93 @@ export async function POST(request: NextRequest) {
         // Log timing update
         await db.trafficLog.create({
           data: {
+            intersectionId: currentTimingLight.intersectionId,
             trafficLightId: lightId,
             action: 'TIMING_UPDATE',
-            previousState: currentLight.status,
-            newState: currentLight.status,
+            previousState: currentTimingLight.status,
+            newState: currentTimingLight.status,
             reason: 'Timing parameters updated',
-            vehicleCount: totalVehicles
+            vehicleCount: currentTimingLight.road.vehicleCount
           }
         });
 
         break;
 
-      case 'reset':
-        updatedLight = await db.trafficLight.update({
-          where: { id: lightId },
+      case 'reset_intersection':
+        if (!intersectionId) {
+          return NextResponse.json(
+            { error: 'Intersection ID is required for reset' },
+            { status: 400 }
+          );
+        }
+
+        const resetIntersection = await db.intersection.findUnique({
+          where: { id: intersectionId },
+          include: {
+            trafficLights: true
+          }
+        });
+
+        if (!resetIntersection) {
+          return NextResponse.json(
+            { error: 'Intersection not found' },
+            { status: 404 }
+          );
+        }
+
+        // Reset all traffic lights in the intersection
+        const resetUpdates = resetIntersection.trafficLights.map(light => 
+          db.trafficLight.update({
+            where: { id: light.id },
+            data: {
+              status: Status.RED,
+              timing: {
+                red: 30,
+                yellow: 5,
+                green: 25,
+                cycle: 60
+              },
+              lastChanged: new Date(),
+              totalCycles: 0
+            }
+          })
+        );
+
+        await Promise.all(resetUpdates);
+
+        // Reset intersection algorithm
+        updatedIntersection = await db.intersection.update({
+          where: { id: intersectionId },
           data: {
-            status: Status.RED,
-            algorithm: Algorithm.ADAPTIVE,
-            timing: {
-              red: 30,
-              yellow: 5,
-              green: 25,
-              cycle: 60
-            },
-            lastChanged: new Date(),
-            totalCycles: 0
+            algorithm: Algorithm.ADAPTIVE
           },
           include: {
-            roads: {
+            trafficLights: {
               include: {
-                vehicles: true
+                road: {
+                  include: {
+                    vehicles: true
+                  }
+                }
               }
             }
           }
         });
 
         // Log reset
-        await db.trafficLog.create({
-          data: {
-            trafficLightId: lightId,
+        await db.trafficLog.createMany({
+          data: resetIntersection.trafficLights.map(light => ({
+            intersectionId,
+            trafficLightId: light.id,
             action: 'RESET',
-            previousState: currentLight.status,
+            previousState: light.status,
             newState: Status.RED,
-            reason: 'Traffic light reset to default',
-            vehicleCount: totalVehicles
-          }
+            reason: 'Intersection reset to default',
+            vehicleCount: 0
+          }))
         });
 
-        break;
+        return NextResponse.json(updatedIntersection);
 
       default:
         return NextResponse.json(

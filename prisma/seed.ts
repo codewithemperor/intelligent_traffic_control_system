@@ -10,11 +10,14 @@ async function main() {
     // Clear existing data (optional - comment out if you want to keep existing data)
     console.log('🧹 Clearing existing data...');
     await prisma.sensorReading.deleteMany();
+    await prisma.phaseLight.deleteMany();
     await prisma.trafficLog.deleteMany();
     await prisma.vehicle.deleteMany();
     await prisma.sensor.deleteMany();
-    await prisma.road.deleteMany();
     await prisma.trafficLight.deleteMany();
+    await prisma.intersectionPhase.deleteMany();
+    await prisma.road.deleteMany();
+    await prisma.intersection.deleteMany();
 
     // Initialize traffic intersections
     console.log('🏗️  Initializing traffic intersections...');
@@ -42,11 +45,16 @@ async function main() {
 
     // Generate some traffic logs
     console.log('📝 Generating traffic logs...');
-    const trafficLights = await prisma.trafficLight.findMany();
+    const trafficLights = await prisma.trafficLight.findMany({
+      include: {
+        intersection: true
+      }
+    });
 
     for (const light of trafficLights) {
       await prisma.trafficLog.create({
         data: {
+          intersectionId: light.intersectionId,
           trafficLightId: light.id,
           action: 'CYCLE_CHANGE',
           previousState: 'RED',
@@ -61,6 +69,7 @@ async function main() {
 
     console.log('✅ Database seed completed successfully!');
     console.log('📊 Summary:');
+    console.log(`   - Intersections: ${await prisma.intersection.count()}`);
     console.log(`   - Traffic Lights: ${trafficLights.length}`);
     console.log(`   - Roads: ${roads.length}`);
     console.log(`   - Sensors: ${sensors.length}`);

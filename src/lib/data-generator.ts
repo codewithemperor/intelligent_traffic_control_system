@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { VehicleType, Direction, Algorithm } from '@/types/traffic';
+import { VehicleType, Direction, Algorithm, Status } from '@/types/traffic';
 import { CAMPUS_INTERSECTIONS, VEHICLE_GENERATION_RULES } from '@/constants/traffic-config';
 
 export class DataGenerator {
@@ -12,23 +12,16 @@ export class DataGenerator {
       
       for (const intersection of CAMPUS_INTERSECTIONS) {
         // Check if intersection already exists
-        const existing = await db.trafficLight.findFirst({
+        const existing = await db.intersection.findFirst({
           where: { name: intersection.name }
         });
         
         if (!existing) {
-          // Create traffic light
-          const trafficLight = await db.trafficLight.create({
+          // Create intersection
+          const newIntersection = await db.intersection.create({
             data: {
               name: intersection.name,
               location: intersection.name,
-              status: 'RED',
-              timing: {
-                red: 30,
-                yellow: 5,
-                green: 25,
-                cycle: 60
-              },
               algorithm: Algorithm.ADAPTIVE,
               priority: 1,
               isActive: true
@@ -36,22 +29,72 @@ export class DataGenerator {
           });
 
           // Create roads for this intersection
+          const createdRoads = [];
           for (let i = 0; i < intersection.roads.length; i++) {
             const roadName = intersection.roads[i];
             const direction = Object.values(Direction)[i % Object.values(Direction).length];
             
-            await db.road.create({
+            const road = await db.road.create({
               data: {
                 name: roadName,
                 direction,
                 vehicleCount: Math.floor(Math.random() * 10),
                 maxCapacity: 50,
-                trafficLightId: trafficLight.id,
+                intersectionId: newIntersection.id,
                 isActive: true,
                 congestionLevel: Math.random() * 0.5,
                 averageSpeed: 25 + Math.random() * 15
               }
             });
+            createdRoads.push(road);
+          }
+
+          // Create traffic lights for each road
+          const createdTrafficLights = [];
+          for (const road of createdRoads) {
+            const trafficLight = await db.trafficLight.create({
+              data: {
+                intersectionId: newIntersection.id,
+                roadId: road.id,
+                status: Status.RED,
+                timing: {
+                  red: 30,
+                  yellow: 5,
+                  green: 25,
+                  cycle: 60
+                },
+                isActive: true
+              }
+            });
+            createdTrafficLights.push(trafficLight);
+          }
+
+          // Create intersection phases for coordinated traffic control
+          const phases = this.createIntersectionPhases(createdTrafficLights, intersection.roads.length);
+          const createdPhases = [];
+          
+          for (let i = 0; i < phases.length; i++) {
+            const phase = await db.intersectionPhase.create({
+              data: {
+                intersectionId: newIntersection.id,
+                name: phases[i].name,
+                phaseNumber: phases[i].phaseNumber,
+                timing: phases[i].timing,
+                isActive: true
+              }
+            });
+            createdPhases.push(phase);
+
+            // Create phase light mappings
+            for (const phaseLight of phases[i].lights) {
+              await db.phaseLight.create({
+                data: {
+                  intersectionPhaseId: phase.id,
+                  trafficLightId: phaseLight.trafficLightId,
+                  status: phaseLight.status
+                }
+              });
+            }
           }
 
           // Create sensors for this intersection
@@ -60,21 +103,34 @@ export class DataGenerator {
               {
                 name: `${intersection.name} - Main Sensor`,
                 type: 'LOOP_DETECTOR',
-                trafficLightId: trafficLight.id,
+                intersectionId: newIntersection.id,
                 isActive: true,
                 sensitivity: 1.0
               },
               {
                 name: `${intersection.name} - Camera Sensor`,
                 type: 'CAMERA',
-                trafficLightId: trafficLight.id,
+                intersectionId: newIntersection.id,
                 isActive: true,
                 sensitivity: 0.9
               }
             ]
           });
 
-          console.log(`Created intersection: ${intersection.name}`);
+          // Create road-specific sensors
+          for (const road of createdRoads) {
+            await db.sensor.create({
+              data: {
+                name: `${road.name} - Vehicle Counter`,
+                type: 'PRESSURE',
+                roadId: road.id,
+                isActive: true,
+                sensitivity: 1.0
+              }
+            });
+          }
+
+          console.log(`Created intersection: ${intersection.name} with ${createdRoads.length} roads and ${createdTrafficLights.length} traffic lights`);
         }
       }
       
@@ -83,6 +139,76 @@ export class DataGenerator {
       console.error('Error initializing intersections:', error);
       throw error;
     }
+  }
+
+  /**
+   * Create intersection phases for coordinated traffic control
+   */
+  private static createIntersectionPhases(trafficLights: any[], roadCount: number) {
+    const phases = [];
+    
+    if (roadCount === 3) {
+      // 3-way intersection: Phase 1 (North-South), Phase 2 (East)
+      phases.push({
+        name: 'North-South Flow',
+        phaseNumber: 1,
+        timing: { green: 25, yellow: 5, red: 30, allRed: 2 },
+        lights: [
+          { trafficLightId: trafficLights[0].id, status: Status.GREEN },
+          { trafficLightId: trafficLights[1].id, status: Status.GREEN },
+          { trafficLightId: trafficLights[2].id, status: Status.RED }
+        ]
+      });
+      
+      phases.push({
+        name: 'East Flow',
+        phaseNumber: 2,
+        timing: { green: 20, yellow: 5, red: 35, allRed: 2 },
+        lights: [
+          { trafficLightId: trafficLights[0].id, status: Status.RED },
+          { trafficLightId: trafficLights[1].id, status: Status.RED },
+          { trafficLightId: trafficLights[2].id, status: Status.GREEN }
+        ]
+      });
+    } else if (roadCount === 4) {
+      // 4-way intersection: Phase 1 (North-South), Phase 2 (East-West)
+      phases.push({
+        name: 'North-South Flow',
+        phaseNumber: 1,
+        timing: { green: 25, yellow: 5, red: 30, allRed: 2 },
+        lights: [
+          { trafficLightId: trafficLights[0].id, status: Status.GREEN },
+          { trafficLightId: trafficLights[1].id, status: Status.GREEN },
+          { trafficLightId: trafficLights[2].id, status: Status.RED },
+          { trafficLightId: trafficLights[3].id, status: Status.RED }
+        ]
+      });
+      
+      phases.push({
+        name: 'East-West Flow',
+        phaseNumber: 2,
+        timing: { green: 25, yellow: 5, red: 30, allRed: 2 },
+        lights: [
+          { trafficLightId: trafficLights[0].id, status: Status.RED },
+          { trafficLightId: trafficLights[1].id, status: Status.RED },
+          { trafficLightId: trafficLights[2].id, status: Status.GREEN },
+          { trafficLightId: trafficLights[3].id, status: Status.GREEN }
+        ]
+      });
+    } else {
+      // Default: single phase for all lights
+      phases.push({
+        name: 'All Flow',
+        phaseNumber: 1,
+        timing: { green: 30, yellow: 5, red: 25, allRed: 2 },
+        lights: trafficLights.map(light => ({
+          trafficLightId: light.id,
+          status: Status.GREEN
+        }))
+      });
+    }
+    
+    return phases;
   }
 
   /**
@@ -171,7 +297,10 @@ export class DataGenerator {
     try {
       const roads = await db.road.findMany({
         where: { isActive: true },
-        include: { trafficLight: true }
+        include: { 
+          intersection: true,
+          trafficLights: true
+        }
       });
 
       if (roads.length === 0) {
@@ -227,7 +356,7 @@ export class DataGenerator {
           where: { 
             OR: [
               { roadId: road.id },
-              { trafficLightId: road.trafficLightId }
+              { intersectionId: road.intersectionId }
             ]
           }
         });
@@ -268,7 +397,8 @@ export class DataGenerator {
         include: {
           road: {
             include: {
-              trafficLight: true
+              intersection: true,
+              trafficLights: true
             }
           }
         }

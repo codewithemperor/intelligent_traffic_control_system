@@ -5,15 +5,15 @@ import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { TrafficLight, Status } from '@/types/traffic';
+import { Status } from '@/types/traffic';
 import { Activity, Zap, AlertTriangle, TrendingUp } from 'lucide-react';
 
 interface SystemOverviewProps {
-  trafficLights: TrafficLight[];
+  intersections: any[];
 }
 
 export const SystemOverview: React.FC<SystemOverviewProps> = ({
-  trafficLights
+  intersections
 }) => {
   const getStatusColor = (status: Status) => {
     switch (status) {
@@ -33,21 +33,28 @@ export const SystemOverview: React.FC<SystemOverviewProps> = ({
   };
 
   const getStatusCount = (status: Status) => {
-    return trafficLights.filter(light => light.status === status).length;
+    return intersections.reduce((count, intersection) => 
+      count + intersection.trafficLights.filter(light => light.status === status).length, 0
+    );
   };
 
-  const totalVehicles = trafficLights.reduce((sum, light) => 
-    sum + light.roads?.reduce((roadSum, road) => roadSum + road.vehicleCount, 0) || 0, 0
+  const totalVehicles = intersections.reduce((sum, intersection) => 
+    sum + intersection.roads?.reduce((roadSum, road) => roadSum + road.vehicleCount, 0) || 0, 0
   );
 
-  const totalCapacity = trafficLights.reduce((sum, light) => 
-    sum + light.roads?.reduce((roadSum, road) => roadSum + road.maxCapacity, 0) || 0, 0
+  const totalCapacity = intersections.reduce((sum, intersection) => 
+    sum + intersection.roads?.reduce((roadSum, road) => roadSum + road.maxCapacity, 0) || 0, 0
+  );
+
+  const totalTrafficLights = intersections.reduce((sum, intersection) => sum + intersection.trafficLights.length, 0);
+  const activeTrafficLights = intersections.reduce((sum, intersection) => 
+    sum + intersection.trafficLights.filter(light => light.isActive).length, 0
   );
 
   const averageCongestion = totalCapacity > 0 ? 
-    trafficLights.reduce((sum, light) => 
-      sum + light.roads?.reduce((roadSum, road) => roadSum + road.congestionLevel, 0) || 0, 0
-    ) / trafficLights.reduce((sum, light) => sum + (light.roads?.length || 1), 0) : 0;
+    intersections.reduce((sum, intersection) => 
+      sum + intersection.roads?.reduce((roadSum, road) => roadSum + road.congestionLevel, 0) || 0, 0
+    ) / intersections.reduce((sum, intersection) => sum + (intersection.roads?.length || 1), 0) : 0;
 
   const systemEfficiency = Math.round((1 - averageCongestion) * 100);
 
@@ -57,6 +64,13 @@ export const SystemOverview: React.FC<SystemOverviewProps> = ({
     { status: Status.YELLOW, count: getStatusCount(Status.YELLOW), label: 'Yellow Lights' },
     { status: Status.MAINTENANCE, count: getStatusCount(Status.MAINTENANCE), label: 'Maintenance' }
   ];
+
+  const getIntersectionHealth = (intersection: any) => {
+    const totalVehicles = intersection.roads.reduce((sum, road) => sum + road.vehicleCount, 0);
+    const totalCapacity = intersection.roads.reduce((sum, road) => sum + road.maxCapacity, 0);
+    const congestion = totalCapacity > 0 ? totalVehicles / totalCapacity : 0;
+    return Math.round((1 - congestion) * 100);
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -127,33 +141,42 @@ export const SystemOverview: React.FC<SystemOverviewProps> = ({
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {trafficLights.slice(0, 5).map((light) => (
-              <motion.div
-                key={light.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.3 }}
-                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
-              >
-                <div className="flex-1">
-                  <div className="font-medium text-sm">{light.name}</div>
-                  <div className="text-xs text-gray-500">{light.location}</div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Badge variant={getStatusColor(light.status) as any} className="text-xs">
-                    {light.status}
-                  </Badge>
-                  <div className="text-xs text-gray-500">
-                    {light.roads?.reduce((sum, road) => sum + road.vehicleCount, 0) || 0} vehicles
+            {intersections.slice(0, 5).map((intersection) => {
+              const intersectionVehicles = intersection.roads.reduce((sum, road) => sum + road.vehicleCount, 0);
+              const health = getIntersectionHealth(intersection);
+              const activeLights = intersection.trafficLights.filter(light => light.isActive).length;
+              
+              return (
+                <motion.div
+                  key={intersection.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                >
+                  <div className="flex-1">
+                    <div className="font-medium text-sm">{intersection.name}</div>
+                    <div className="text-xs text-gray-500">{intersection.location}</div>
+                    <div className="text-xs text-gray-500">
+                      {activeLights}/{intersection.trafficLights.length} lights active
+                    </div>
                   </div>
-                </div>
-              </motion.div>
-            ))}
+                  <div className="flex items-center space-x-2">
+                    <Badge variant={intersection.isActive ? 'default' : 'secondary'} className="text-xs">
+                      {health}%
+                    </Badge>
+                    <div className="text-xs text-gray-500">
+                      {intersectionVehicles} vehicles
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
             
-            {trafficLights.length > 5 && (
+            {intersections.length > 5 && (
               <div className="text-center pt-2">
                 <span className="text-sm text-gray-500">
-                  +{trafficLights.length - 5} more intersections
+                  +{intersections.length - 5} more intersections
                 </span>
               </div>
             )}
@@ -173,27 +196,27 @@ export const SystemOverview: React.FC<SystemOverviewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">
-                {trafficLights.length}
+                {intersections.length}
               </div>
-              <div className="text-sm text-gray-600">Total Lights</div>
+              <div className="text-sm text-gray-600">Total Intersections</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
-                {trafficLights.filter(light => light.isActive).length}
+                {intersections.filter(intersection => intersection.isActive).length}
               </div>
-              <div className="text-sm text-gray-600">Active Lights</div>
+              <div className="text-sm text-gray-600">Active Intersections</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-purple-600">
-                {totalVehicles}
+                {totalTrafficLights}
               </div>
-              <div className="text-sm text-gray-600">Total Vehicles</div>
+              <div className="text-sm text-gray-600">Total Traffic Lights</div>
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-orange-600">
-                {trafficLights.reduce((sum, light) => sum + light.totalCycles, 0)}
+                {totalVehicles}
               </div>
-              <div className="text-sm text-gray-600">Total Cycles</div>
+              <div className="text-sm text-gray-600">Total Vehicles</div>
             </div>
           </div>
         </CardContent>

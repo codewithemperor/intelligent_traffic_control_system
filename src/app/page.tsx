@@ -10,15 +10,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { TrafficLight as TrafficLightType, Status } from '@/types/traffic';
+import { Status } from '@/types/traffic';
 import { useTrafficData } from '@/hooks/useTrafficData';
 import { useWebSocket } from '@/hooks/useWebSocketClient';
 import { Play, Pause, RotateCcw, AlertTriangle, Activity, Zap } from 'lucide-react';
 
 export default function Dashboard() {
-  const [trafficLights, setTrafficLights] = useState<TrafficLightType[]>([]);
+  const [intersections, setIntersections] = useState<any[]>([]);
   const [isSimulationRunning, setIsSimulationRunning] = useState(false);
-  const [selectedIntersection, setSelectedIntersection] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [simulationInterval, setSimulationInterval] = useState<NodeJS.Timeout | null>(null);
@@ -27,10 +26,10 @@ export default function Dashboard() {
   const { data: trafficData, loading, error, refetch } = useTrafficData();
   const { socket, connected } = useWebSocket();
 
-  // Initialize traffic lights data
+  // Initialize intersections data
   useEffect(() => {
     if (trafficData) {
-      setTrafficLights(trafficData);
+      setIntersections(trafficData);
     }
   }, [trafficData]);
 
@@ -39,21 +38,24 @@ export default function Dashboard() {
     if (socket) {
       // Listen for traffic light updates
       socket.on('traffic-light-changed', (data) => {
-        setTrafficLights(prev => 
-          prev.map(light => 
-            light.id === data.lightId 
-              ? { ...light, status: data.newStatus, lastChanged: new Date(data.timestamp) }
-              : light
-          )
+        setIntersections(prev => 
+          prev.map(intersection => ({
+            ...intersection,
+            trafficLights: intersection.trafficLights.map(light => 
+              light.id === data.lightId 
+                ? { ...light, status: data.newStatus, lastChanged: new Date(data.timestamp) }
+                : light
+            )
+          }))
         );
       });
 
       // Listen for vehicle count updates
       socket.on('vehicle-count-changed', (data) => {
-        setTrafficLights(prev => 
-          prev.map(light => ({
-            ...light,
-            roads: light.roads?.map(road => 
+        setIntersections(prev => 
+          prev.map(intersection => ({
+            ...intersection,
+            roads: intersection.roads?.map(road => 
               road.id === data.roadId 
                 ? { ...road, vehicleCount: data.count, congestionLevel: data.congestionLevel }
                 : road
@@ -118,7 +120,7 @@ export default function Dashboard() {
 
           if (response.ok) {
             const result = await response.json();
-            console.log(`Traffic cycle processed: ${result.updatedLights} lights updated`);
+            console.log(`Traffic cycle processed: ${result.updatedIntersections} intersections updated`);
             refetch(); // Refresh data
           }
         } catch (error) {
@@ -189,15 +191,15 @@ export default function Dashboard() {
       stopSimulation();
       
       await Promise.all(
-        trafficLights.map(light => 
+        intersections.map(intersection => 
           fetch('/api/traffic/control', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              action: 'reset',
-              lightId: light.id
+              action: 'reset_intersection',
+              intersectionId: intersection.id
             }),
           })
         )
@@ -234,8 +236,13 @@ export default function Dashboard() {
 
       if (response.ok) {
         const updatedLight = await response.json();
-        setTrafficLights(prev => 
-          prev.map(light => light.id === lightId ? updatedLight : light)
+        setIntersections(prev => 
+          prev.map(intersection => ({
+            ...intersection,
+            trafficLights: intersection.trafficLights.map(light => 
+              light.id === lightId ? updatedLight : light
+            )
+          }))
         );
       }
     } catch (error) {
@@ -243,26 +250,60 @@ export default function Dashboard() {
     }
   };
 
+  const handleIntersectionEmergency = async (intersectionId: string) => {
+    try {
+      const response = await fetch('/api/traffic/control', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'intersection_emergency',
+          intersectionId
+        }),
+      });
+
+      if (response.ok) {
+        const updatedIntersection = await response.json();
+        setIntersections(prev => 
+          prev.map(intersection => 
+            intersection.id === intersectionId ? updatedIntersection : intersection
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Error in intersection emergency mode:', error);
+    }
+  };
+
   const calculateSystemMetrics = () => {
-    if (!trafficLights.length) return {
-      totalLights: 0,
-      activeLights: 0,
+    if (!intersections.length) return {
+      totalIntersections: 0,
+      activeIntersections: 0,
+      totalTrafficLights: 0,
+      activeTrafficLights: 0,
       totalVehicles: 0,
       averageCongestion: 0,
       systemEfficiency: 0
     };
 
-    const activeLights = trafficLights.filter(light => light.isActive).length;
-    const totalVehicles = trafficLights.reduce((sum, light) => 
-      sum + light.roads?.reduce((roadSum, road) => roadSum + road.vehicleCount, 0) || 0, 0
+    const activeIntersections = intersections.filter(intersection => intersection.isActive).length;
+    const totalTrafficLights = intersections.reduce((sum, intersection) => sum + intersection.trafficLights.length, 0);
+    const activeTrafficLights = intersections.reduce((sum, intersection) => 
+      sum + intersection.trafficLights.filter(light => light.isActive).length, 0
     );
-    const totalCongestion = trafficLights.reduce((sum, light) => 
-      sum + light.roads?.reduce((roadSum, road) => roadSum + road.congestionLevel, 0) || 0, 0
-    ) / trafficLights.reduce((sum, light) => sum + (light.roads?.length || 1), 0);
+    const totalVehicles = intersections.reduce((sum, intersection) => 
+      sum + intersection.roads?.reduce((roadSum, road) => roadSum + road.vehicleCount, 0) || 0, 0
+    );
+    const totalCongestion = intersections.reduce((sum, intersection) => 
+      sum + intersection.roads?.reduce((roadSum, road) => roadSum + road.congestionLevel, 0) || 0, 0
+    ) / intersections.reduce((sum, intersection) => sum + (intersection.roads?.length || 1), 0);
     
     return {
-      totalLights: trafficLights.length,
-      activeLights,
+      totalIntersections: intersections.length,
+      activeIntersections,
+      totalTrafficLights,
+      activeTrafficLights,
       totalVehicles,
       averageCongestion: Math.round(totalCongestion * 100),
       systemEfficiency: Math.round((1 - totalCongestion) * 100)
@@ -270,8 +311,6 @@ export default function Dashboard() {
   };
 
   const metrics = calculateSystemMetrics();
-
-
 
   if (error) {
     return (
@@ -361,13 +400,13 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <MetricsCard
                 title="Total Intersections"
-                value={metrics.totalLights}
+                value={metrics.totalIntersections}
                 icon={<Activity className="h-6 w-6" />}
                 color="text-blue-600"
               />
               <MetricsCard
                 title="Active Lights"
-                value={metrics.activeLights}
+                value={metrics.activeTrafficLights}
                 icon={<Zap className="h-6 w-6" />}
                 color="text-green-600"
               />
@@ -386,7 +425,7 @@ export default function Dashboard() {
             </div>
 
             {/* System Overview */}
-            <SystemOverview trafficLights={trafficLights} />
+            <SystemOverview intersections={intersections} />
 
             {/* Alerts */}
             <AlertSystem alerts={alerts} />
@@ -394,16 +433,17 @@ export default function Dashboard() {
 
           <TabsContent value="intersections" className="space-y-6">
             <div className="grid grid-cols-1 gap-6">
-              {trafficLights.map((light) => (
+              {intersections.map((intersection) => (
                 <motion.div
-                  key={light.id}
+                  key={intersection.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
                 >
                   <TrafficIntersection
-                    intersection={light}
+                    intersection={intersection}
                     onManualOverride={handleManualOverride}
+                    onEmergencyMode={handleIntersectionEmergency}
                   />
                 </motion.div>
               ))}
