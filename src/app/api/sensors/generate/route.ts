@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     if (roadId) {
       const road = await db.road.findUnique({
         where: { id: roadId },
-        include: { trafficLight: true }
+        include: { trafficLights: true }
       });
       if (!road) {
         return NextResponse.json(
@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     } else {
       roads = await db.road.findMany({
         where: { isActive: true },
-        include: { trafficLight: true }
+        include: { trafficLights: true }
       });
     }
 
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
         where: { 
           OR: [
             { roadId: road.id },
-            { trafficLightId: road.trafficLightId }
+            { trafficLightId: road.trafficLights[0]?.id }
           ]
         }
       });

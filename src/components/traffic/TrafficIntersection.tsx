@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Status, Direction } from '@/types/traffic';
 import { TrafficLight } from './TrafficLight';
@@ -9,21 +9,37 @@ import { Badge } from '@/components/ui/badge';
 import { VehicleCounter } from './VehicleCounter';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle } from 'lucide-react';
+import { useCountdown } from '@/hooks/useCountdown';
 
 interface TrafficIntersectionProps {
   intersection: any;
   onManualOverride?: (id: string, status: Status) => void;
   onEmergencyMode?: (id: string) => void;
-  countdown?: number;
 }
 
 export const TrafficIntersection: React.FC<TrafficIntersectionProps> = ({
   intersection,
   onManualOverride,
-  onEmergencyMode,
-  countdown
+  onEmergencyMode
 }) => {
   const { id, name, location, isActive, algorithm, priority, trafficLights = [], roads = [] } = intersection;
+  const { calculateTrafficLightCountdown } = useCountdown();
+  const [countdowns, setCountdowns] = useState<{ [key: string]: number }>({});
+
+  // Update countdowns every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const newCountdowns: { [key: string]: number } = {};
+      
+      trafficLights.forEach((light: any) => {
+        newCountdowns[light.id] = calculateTrafficLightCountdown(light);
+      });
+      
+      setCountdowns(newCountdowns);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [trafficLights, calculateTrafficLightCountdown]);
 
   const getDirectionIcon = (direction: Direction) => {
     switch (direction) {
@@ -119,12 +135,17 @@ export const TrafficIntersection: React.FC<TrafficIntersectionProps> = ({
                       vehicleCount={light.road?.vehicleCount || 0}
                       isManual={!!onManualOverride}
                       onManualOverride={onManualOverride}
-                      countdown={countdown}
+                      countdown={countdowns[light.id] || 0}
                       compact={true}
                     />
                     <div className="mt-2 text-xs text-center">
                       <div className="font-medium">{light.road?.name || 'Unknown'}</div>
                       <div className="text-gray-500">{getDirectionIcon(light.road?.direction)}</div>
+                      {countdowns[light.id] > 0 && (
+                        <div className="text-xs font-semibold text-blue-600">
+                          {countdowns[light.id]}s
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 ))}
@@ -222,20 +243,6 @@ export const TrafficIntersection: React.FC<TrafficIntersectionProps> = ({
             </div>
           </div>
         </div>
-
-        {/* Current Phase Info */}
-        {intersection.phases && intersection.phases.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <h4 className="font-semibold mb-2">Active Phases</h4>
-            <div className="flex flex-wrap gap-2">
-              {intersection.phases.map((phase: any) => (
-                <Badge key={phase.id} variant="outline" className="text-xs">
-                  {phase.name}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

@@ -42,10 +42,26 @@ export enum Algorithm {
   EMERGENCY = 'EMERGENCY'
 }
 
-export interface TrafficLight {
+export interface Intersection {
   id: string;
   name: string;
   location: string;
+  isActive: boolean;
+  priority: number;
+  algorithm: Algorithm;
+  createdAt: Date;
+  updatedAt: Date;
+  trafficLights?: TrafficLight[];
+  roads?: Road[];
+  sensors?: Sensor[];
+  logs?: TrafficLog[];
+}
+
+export interface TrafficLight {
+  id: string;
+  intersectionId: string;
+  roadId: string;
+  direction: Direction;
   status: Status;
   timing: {
     red: number;
@@ -54,13 +70,13 @@ export interface TrafficLight {
     cycle: number;
   };
   isActive: boolean;
-  priority: number;
-  algorithm: Algorithm;
   lastChanged: Date;
   totalCycles: number;
+  currentCycleTime: number;
   createdAt: Date;
   updatedAt: Date;
-  roads?: Road[];
+  intersection?: Intersection;
+  road?: Road;
   sensors?: Sensor[];
   logs?: TrafficLog[];
 }
@@ -71,14 +87,15 @@ export interface Road {
   direction: Direction;
   vehicleCount: number;
   maxCapacity: number;
-  trafficLightId: string;
+  intersectionId: string;
   isActive: boolean;
   congestionLevel: number;
   averageSpeed: number;
   createdAt: Date;
   updatedAt: Date;
-  trafficLight?: TrafficLight;
+  intersection?: Intersection;
   vehicles?: Vehicle[];
+  trafficLights?: TrafficLight[];
   sensors?: Sensor[];
 }
 
@@ -102,12 +119,14 @@ export interface Sensor {
   type: SensorType;
   roadId?: string;
   trafficLightId?: string;
+  intersectionId?: string;
   isActive: boolean;
   sensitivity: number;
   lastReading: number;
   createdAt: Date;
   road?: Road;
   trafficLight?: TrafficLight;
+  intersection?: Intersection;
   readings?: SensorReading[];
 }
 
@@ -123,6 +142,7 @@ export interface SensorReading {
 
 export interface TrafficLog {
   id: string;
+  intersectionId: string;
   trafficLightId: string;
   action: string;
   previousState: Status;
@@ -132,6 +152,7 @@ export interface TrafficLog {
   efficiency?: number;
   waitTime?: number;
   timestamp: Date;
+  intersection?: Intersection;
   trafficLight?: TrafficLight;
 }
 

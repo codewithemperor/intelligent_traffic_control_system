@@ -23,11 +23,6 @@ export async function GET() {
                   take: 1
                 }
               }
-            },
-            phaseLights: {
-              include: {
-                intersectionPhase: true
-              }
             }
           }
         },
@@ -35,18 +30,6 @@ export async function GET() {
           include: {
             vehicles: true,
             sensors: true
-          }
-        },
-        phases: {
-          include: {
-            phaseLights: {
-              include: {
-                trafficLight: true
-              }
-            }
-          },
-          orderBy: {
-            phaseNumber: 'asc'
           }
         },
         sensors: {
@@ -107,16 +90,7 @@ export async function POST(request: NextRequest) {
             road: true
           }
         },
-        roads: true,
-        phases: {
-          include: {
-            phaseLights: {
-              include: {
-                trafficLight: true
-              }
-            }
-          }
-        }
+        roads: true
       }
     });
 

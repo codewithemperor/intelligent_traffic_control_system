@@ -10,12 +10,10 @@ async function main() {
     // Clear existing data (optional - comment out if you want to keep existing data)
     console.log('🧹 Clearing existing data...');
     await prisma.sensorReading.deleteMany();
-    await prisma.phaseLight.deleteMany();
     await prisma.trafficLog.deleteMany();
     await prisma.vehicle.deleteMany();
     await prisma.sensor.deleteMany();
     await prisma.trafficLight.deleteMany();
-    await prisma.intersectionPhase.deleteMany();
     await prisma.road.deleteMany();
     await prisma.intersection.deleteMany();
 

@@ -21,52 +21,27 @@ model Intersection {
   updatedAt   DateTime @updatedAt
   
   trafficLights TrafficLight[]
-  phases      IntersectionPhase[]
   roads       Road[]
   sensors     Sensor[]
   logs        TrafficLog[]
-}
-
-model IntersectionPhase {
-  id            String   @id @default(cuid())
-  intersectionId String
-  name          String   // e.g., "North-South Green", "East-West Green"
-  phaseNumber   Int      // Order of execution (1, 2, 3, etc.)
-  timing        Json     // {green: 25, yellow: 5, red: 30, allRed: 2}
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  
-  intersection  Intersection @relation(fields: [intersectionId], references: [id])
-  phaseLights   PhaseLight[]
-}
-
-model PhaseLight {
-  id              String   @id @default(cuid())
-  intersectionPhaseId String
-  trafficLightId  String
-  status          Status   // What status this light should have during this phase
-  createdAt       DateTime @default(now())
-  
-  intersectionPhase IntersectionPhase @relation(fields: [intersectionPhaseId], references: [id])
-  trafficLight     TrafficLight      @relation(fields: [trafficLightId], references: [id])
 }
 
 model TrafficLight {
   id          String   @id @default(cuid())
   intersectionId String
   roadId      String
+  direction   Direction // Direction this traffic light controls
   status      Status   @default(RED)
   timing      Json     // {red: 30, yellow: 5, green: 25, cycle: 60}
   isActive    Boolean  @default(true)
   lastChanged DateTime @default(now())
   totalCycles Int      @default(0)
+  currentCycleTime Int @default(0) // Current time in cycle (for countdown)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
   intersection Intersection @relation(fields: [intersectionId], references: [id])
   road        Road       @relation(fields: [roadId], references: [id])
-  phaseLights PhaseLight[]
   sensors     Sensor[]
   logs        TrafficLog[]
 }
