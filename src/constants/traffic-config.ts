@@ -23,12 +23,12 @@ export const VEHICLE_GENERATION_RULES: VehicleGenerationRules = {
 };
 
 export const CAMPUS_INTERSECTIONS: CampusIntersection[] = [
-  { name: "Main Gate Junction", roads: ["Main Road N", "Main Road S", "Gate Road E", "Gate Road W"] },
-  { name: "Library Intersection", roads: ["Library Ave N", "Library Ave S", "Campus Dr E", "Campus Dr W"] },
-  { name: "Hostel Junction", roads: ["Hostel Rd N", "Hostel Rd S", "Recreation Ave E", "Recreation Ave W"] },
-  { name: "Admin Block Junction", roads: ["Admin Ave N", "Admin Ave S", "Faculty Rd E", "Faculty Rd W"] },
-  { name: "Sports Complex Junction", roads: ["Sports Rd N", "Sports Rd S", "Stadium Ave E", "Stadium Ave W"] },
-  { name: "Cafeteria Intersection", roads: ["Cafeteria St N", "Cafeteria St S", "Dining Ave E", "Dining Ave W"] }
+  { name: "Main Gate Junction", roads: ["Main Road N", "Main Road S", "Gate Road E", ] },
+  { name: "Library Intersection", roads: ["Library Ave N", "Library Ave S", ] },
+  // { name: "Hostel Junction", roads: ["Hostel Rd N", "Hostel Rd S", "Recreation Ave E", "Recreation Ave W"] },
+  // { name: "Admin Block Junction", roads: ["Admin Ave N", "Admin Ave S", "Faculty Rd E", "Faculty Rd W"] },
+  // { name: "Sports Complex Junction", roads: ["Sports Rd N", "Sports Rd S", "Stadium Ave E", "Stadium Ave W"] },
+  // { name: "Cafeteria Intersection", roads: ["Cafeteria St N", "Cafeteria St S", "Dining Ave E", "Dining Ave W"] }
 ];
 
 export const ALGORITHM_DESCRIPTIONS: Record<Algorithm, string> = {

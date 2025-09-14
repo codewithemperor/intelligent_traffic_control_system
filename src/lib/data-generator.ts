@@ -38,11 +38,11 @@ export class DataGenerator {
               data: {
                 name: roadName,
                 direction,
-                vehicleCount: Math.floor(Math.random() * 10),
-                maxCapacity: 50,
+                vehicleCount: Math.floor(Math.random() * 5), // Start with fewer vehicles
+                maxCapacity: 30, // Reduced capacity for faster cycling
                 intersectionId: newIntersection.id,
                 isActive: true,
-                congestionLevel: Math.random() * 0.5,
+                congestionLevel: Math.random() * 0.3, // Lower initial congestion
                 averageSpeed: 25 + Math.random() * 15
               }
             });
@@ -59,10 +59,10 @@ export class DataGenerator {
                 direction: road.direction,
                 status: Status.RED,
                 timing: {
-                  red: 30,
-                  yellow: 5,
-                  green: 25,
-                  cycle: 60
+                  red: 15,
+                  yellow: 3,
+                  green: 8,
+                  cycle: 26
                 },
                 isActive: true,
                 currentCycleTime: 0
@@ -186,19 +186,17 @@ export class DataGenerator {
   static getGenerationRate(): number {
     const hour = new Date().getHours();
     
-    if (hour >= 8 && hour <= 9) return VEHICLE_GENERATION_RULES.peakHourBoost; // Peak morning
-    if (hour >= 12 && hour <= 13) return VEHICLE_GENERATION_RULES.peakHourBoost * 0.8; // Lunch
-    if (hour >= 16 && hour <= 17) return VEHICLE_GENERATION_RULES.peakHourBoost; // Peak evening
+    if (hour >= 8 && hour <= 9) return 1.5; // Peak morning - reduced from original
+    if (hour >= 12 && hour <= 13) return 1.2; // Lunch 
+    if (hour >= 16 && hour <= 17) return 1.5; // Peak evening
     if (hour >= 22 || hour <= 6) return 0.3; // Night time
     
     return 1.0; // Normal
   }
 
   /**
-   * Generate vehicles for all active roads - FIXED VERSION
-   * - More likely to generate vehicles during RED lights (piling up)
-   * - Less likely during GREEN lights (cars are moving)
-   * - Each intersection works independently
+   * FAST vehicle generation - adds vehicles quickly to RED light roads
+   * Generates every 2-3 seconds during active periods
    */
   static async generateVehicles(count: number = 1): Promise<any[]> {
     try {
@@ -218,43 +216,54 @@ export class DataGenerator {
       const generatedVehicles = [];
       const generationRate = this.getGenerationRate();
 
-      for (let i = 0; i < count; i++) {
-        // Select roads based on traffic light status - prefer RED light roads for vehicle generation
+      // INCREASED generation for faster simulation
+      const adjustedCount = Math.ceil(count * generationRate * 2); // Double the generation rate
+
+      for (let i = 0; i < adjustedCount; i++) {
+        // Prioritize RED light roads for vehicle accumulation
         const roadsWithStatus = roads.map(road => {
           const trafficLight = road.trafficLights?.[0];
           const lightStatus = trafficLight?.status || 'RED';
           
-          // RED lights should get more vehicles (piling up)
-          // GREEN lights should get fewer vehicles (cars moving through)
           let generationPriority = 1;
           if (lightStatus === 'RED') {
-            generationPriority = 3; // High priority for red lights
-          } else if (lightStatus === 'GREEN') {
-            generationPriority = 0.5; // Low priority for green lights
+            generationPriority = 5; // VERY high priority for red lights
           } else if (lightStatus === 'YELLOW') {
-            generationPriority = 1.5; // Medium priority for yellow lights
+            generationPriority = 2; // Medium priority for yellow lights
+          } else if (lightStatus === 'GREEN') {
+            generationPriority = 0.3; // Very low priority for green lights (cars moving)
           }
+          
+          // Prevent negative vehicle counts
+          const currentVehicleCount = Math.max(0, road.vehicleCount);
           
           return {
             road,
             trafficLight,
             lightStatus,
             generationPriority,
-            availableCapacity: Math.max(0, road.maxCapacity - road.vehicleCount)
+            availableCapacity: Math.max(0, road.maxCapacity - currentVehicleCount),
+            currentVehicleCount
           };
         });
 
-        // Filter roads with available capacity and sort by priority
+        // Filter roads with available capacity and prioritize RED lights
         const availableRoads = roadsWithStatus
           .filter(item => item.availableCapacity > 0)
-          .sort((a, b) => b.generationPriority - a.generationPriority);
+          .sort((a, b) => {
+            // Primary sort: RED lights first
+            if (a.lightStatus === 'RED' && b.lightStatus !== 'RED') return -1;
+            if (b.lightStatus === 'RED' && a.lightStatus !== 'RED') return 1;
+            // Secondary sort: by generation priority
+            return b.generationPriority - a.generationPriority;
+          });
         
         if (availableRoads.length === 0) {
           console.log('All roads at capacity');
           break;
         }
 
-        // Select road with highest priority (prefer RED lights)
+        // Select the highest priority road (prefer RED lights)
         const selectedRoad = availableRoads[0];
         const road = selectedRoad.road;
         
@@ -276,40 +285,44 @@ export class DataGenerator {
           }
         });
 
-        // Update road vehicle count - INCREASE
-        await db.road.update({
-          where: { id: road.id },
-          data: {
-            vehicleCount: {
-              increment: 1
-            },
-            congestionLevel: Math.min((road.vehicleCount + 1) / road.maxCapacity, 1.0)
-          }
-        });
-
-        // Create sensor reading
-        const sensor = await db.sensor.findFirst({
-          where: { 
-            OR: [
-              { roadId: road.id },
-              { intersectionId: road.intersectionId }
-            ]
-          }
-        });
-
-        if (sensor) {
-          await db.sensorReading.create({
+        // SAFE vehicle count increment with verification
+        const currentRoad = await db.road.findUnique({ where: { id: road.id } });
+        if (currentRoad) {
+          const newVehicleCount = Math.max(0, currentRoad.vehicleCount) + 1;
+          const newCongestionLevel = Math.min(newVehicleCount / currentRoad.maxCapacity, 1.0);
+          
+          await db.road.update({
+            where: { id: road.id },
             data: {
-              sensorId: sensor.id,
-              value: 1,
-              vehicleCount: road.vehicleCount + 1,
-              avgSpeed: this.getRandomSpeed(vehicleType)
+              vehicleCount: newVehicleCount,
+              congestionLevel: newCongestionLevel
             }
           });
-        }
 
-        console.log(`Generated ${vehicleType} on ${road.name} (${selectedRoad.lightStatus} light) - Total: ${road.vehicleCount + 1} vehicles`);
-        generatedVehicles.push(vehicle);
+          // Create sensor reading
+          const sensor = await db.sensor.findFirst({
+            where: { 
+              OR: [
+                { roadId: road.id },
+                { intersectionId: road.intersectionId }
+              ]
+            }
+          });
+
+          if (sensor) {
+            await db.sensorReading.create({
+              data: {
+                sensorId: sensor.id,
+                value: 1,
+                vehicleCount: newVehicleCount,
+                avgSpeed: this.getRandomSpeed(vehicleType)
+              }
+            });
+          }
+
+          console.log(`Generated ${vehicleType} on ${road.name} (${selectedRoad.lightStatus} light) - Total: ${newVehicleCount} vehicles`);
+          generatedVehicles.push(vehicle);
+        }
       }
 
       console.log(`Generated ${generatedVehicles.length} vehicles (rate: ${generationRate}x)`);
@@ -321,14 +334,12 @@ export class DataGenerator {
   }
 
   /**
-   * Simulate vehicle movement and exit - FIXED VERSION
-   * - Vehicles move and exit during GREEN lights
-   * - Vehicles pile up during RED lights
-   * - Each intersection works independently
+   * FAST vehicle movement and exit - removes vehicles quickly during GREEN lights
+   * Processes every 2 seconds for rapid flow
    */
   static async simulateVehicleMovement(): Promise<void> {
     try {
-      // Get all active vehicles
+      // Get all active vehicles with road and traffic light info
       const vehicles = await db.vehicle.findMany({
         where: { 
           isMoving: true,
@@ -344,25 +355,26 @@ export class DataGenerator {
         }
       });
 
+      const processedRoads = new Set<string>(); // Track roads we've processed
+
       for (const vehicle of vehicles) {
         const road = vehicle.road;
-        const intersection = road.intersection;
-        
+        if (!road) continue;
+
         // Find the traffic light for this road
         const trafficLight = road.trafficLights?.[0];
         if (!trafficLight) continue;
 
-        // Check if the light is GREEN - vehicles can move and exit
+        const currentTime = new Date();
+        const elapsed = (currentTime.getTime() - trafficLight.lastChanged.getTime()) / 1000;
+
+        // GREEN LIGHT: FAST vehicle exit (every 2 seconds during green)
         if (trafficLight.status === 'GREEN') {
-          // Calculate movement probability based on green time remaining
-          const elapsed = (new Date().getTime() - trafficLight.lastChanged.getTime()) / 1000;
-          const greenTime = trafficLight.timing?.green || 25;
-          const timeRemaining = Math.max(0, greenTime - elapsed);
+          // High exit probability during green - vehicles should exit quickly
+          const greenTime = trafficLight.timing?.green || 8;
+          const exitProbability = Math.min(0.8, 0.4 + (elapsed / greenTime) * 0.6); // 40-80% chance
           
-          // Higher chance to exit as green time progresses
-          const exitProbability = Math.min(0.3 + (elapsed / greenTime) * 0.4, 0.7);
-          
-          if (Math.random() < exitProbability) {
+          if (Math.random() < exitProbability || vehicle.position >= 0.9) {
             // Vehicle exits the road
             await db.vehicle.update({
               where: { id: vehicle.id },
@@ -372,50 +384,41 @@ export class DataGenerator {
               }
             });
 
-            // Update road vehicle count - DECREASE during green
-            if (road.vehicleCount > 0) {
-              await db.road.update({
-                where: { id: road.id },
-                data: {
-                  vehicleCount: {
-                    decrement: 1
-                  },
-                  congestionLevel: Math.max(0, (road.vehicleCount - 1) / road.maxCapacity)
-                }
-              });
-            }
+            // SAFE decrement with verification - only process each road once per cycle
+            if (!processedRoads.has(road.id)) {
+              const currentRoad = await db.road.findUnique({ where: { id: road.id } });
+              if (currentRoad && currentRoad.vehicleCount > 0) {
+                const newVehicleCount = Math.max(0, currentRoad.vehicleCount - 1);
+                const newCongestionLevel = newVehicleCount > 0 ? 
+                  Math.max(0, newVehicleCount / currentRoad.maxCapacity) : 0;
 
-            console.log(`Vehicle ${vehicle.plateNumber} exited ${road.name} during GREEN light`);
+                await db.road.update({
+                  where: { id: road.id },
+                  data: {
+                    vehicleCount: newVehicleCount,
+                    congestionLevel: newCongestionLevel
+                  }
+                });
+
+                console.log(`Vehicle ${vehicle.plateNumber} exited ${road.name} during GREEN - Remaining: ${newVehicleCount}`);
+                processedRoads.add(road.id);
+              }
+            }
           } else {
             // Vehicle moves forward but hasn't exited yet
-            const newPosition = Math.min(vehicle.position + 0.3, 1.0);
+            const newPosition = Math.min(vehicle.position + 0.4, 1.0); // Faster movement
             await db.vehicle.update({
               where: { id: vehicle.id },
-              data: {
-                position: newPosition
-              }
+              data: { position: newPosition }
             });
           }
-        } else if (trafficLight.status === 'RED') {
-          // During RED light - vehicles pile up (increase vehicle count simulation)
-          // Actually, during red light, vehicles should stop moving forward
-          // But new vehicles might join the queue (handled by generateVehicles)
-          
-          // Just update position slightly to simulate creeping forward
-          const newPosition = Math.min(vehicle.position + 0.05, 1.0);
-          await db.vehicle.update({
-            where: { id: vehicle.id },
-            data: {
-              position: newPosition
-            }
-          });
         }
-        // YELLOW light - vehicles prepare to stop, some may exit if close to intersection
+        
+        // YELLOW LIGHT: Some vehicles may exit if close to intersection
         else if (trafficLight.status === 'YELLOW') {
-          const exitProbability = 0.1; // Low chance to exit during yellow
+          const exitProbability = vehicle.position > 0.7 ? 0.6 : 0.1; // High if close to intersection
           
-          if (Math.random() < exitProbability && vehicle.position > 0.8) {
-            // Vehicle exits if close to intersection
+          if (Math.random() < exitProbability) {
             await db.vehicle.update({
               where: { id: vehicle.id },
               data: {
@@ -424,29 +427,56 @@ export class DataGenerator {
               }
             });
 
-            if (road.vehicleCount > 0) {
-              await db.road.update({
-                where: { id: road.id },
-                data: {
-                  vehicleCount: {
-                    decrement: 1
-                  },
-                  congestionLevel: Math.max(0, (road.vehicleCount - 1) / road.maxCapacity)
-                }
-              });
+            if (!processedRoads.has(road.id)) {
+              const currentRoad = await db.road.findUnique({ where: { id: road.id } });
+              if (currentRoad && currentRoad.vehicleCount > 0) {
+                const newVehicleCount = Math.max(0, currentRoad.vehicleCount - 1);
+                const newCongestionLevel = newVehicleCount > 0 ? 
+                  Math.max(0, newVehicleCount / currentRoad.maxCapacity) : 0;
+
+                await db.road.update({
+                  where: { id: road.id },
+                  data: {
+                    vehicleCount: newVehicleCount,
+                    congestionLevel: newCongestionLevel
+                  }
+                });
+
+                console.log(`Vehicle ${vehicle.plateNumber} exited ${road.name} during YELLOW - Remaining: ${newVehicleCount}`);
+                processedRoads.add(road.id);
+              }
             }
           } else {
-            // Slow down movement
+            // Slow movement during yellow
             const newPosition = Math.min(vehicle.position + 0.1, 1.0);
             await db.vehicle.update({
               where: { id: vehicle.id },
-              data: {
-                position: newPosition
-              }
+              data: { position: newPosition }
             });
           }
         }
+        
+        // RED LIGHT: Vehicles stop and queue up (minimal movement)
+        else if (trafficLight.status === 'RED') {
+          // Very minimal movement during red (vehicles creeping forward)
+          const newPosition = Math.min(vehicle.position + 0.05, 1.0);
+          await db.vehicle.update({
+            where: { id: vehicle.id },
+            data: { position: newPosition }
+          });
+        }
       }
+
+      // Clean up old exited vehicles (older than 1 minute)
+      const oneMinuteAgo = new Date(Date.now() - 60000);
+      await db.vehicle.deleteMany({
+        where: {
+          exitedAt: {
+            lt: oneMinuteAgo
+          }
+        }
+      });
+
     } catch (error) {
       console.error('Error simulating vehicle movement:', error);
       throw error;
@@ -454,18 +484,18 @@ export class DataGenerator {
   }
 
   /**
-   * Generate realistic traffic patterns throughout the day
+   * Generate realistic traffic patterns with FASTER timing
    */
   static async generateTrafficPattern(): Promise<void> {
     try {
       const hour = new Date().getHours();
       let generationCount = 1;
 
-      // Adjust generation count based on time of day
-      if (hour >= 8 && hour <= 9) generationCount = 3; // Morning rush
-      if (hour >= 12 && hour <= 13) generationCount = 2; // Lunch rush
-      if (hour >= 16 && hour <= 17) generationCount = 3; // Evening rush
-      if (hour >= 22 || hour <= 6) generationCount = 0; // Night time
+      // INCREASED generation for faster simulation
+      if (hour >= 8 && hour <= 9) generationCount = 2; // Morning rush (reduced from 3)
+      if (hour >= 12 && hour <= 13) generationCount = 2; // Lunch rush 
+      if (hour >= 16 && hour <= 17) generationCount = 2; // Evening rush
+      if (hour >= 22 || hour <= 6) generationCount = 1; // Night time (increased from 0)
 
       if (generationCount > 0) {
         await this.generateVehicles(generationCount);
@@ -480,27 +510,70 @@ export class DataGenerator {
   }
 
   /**
-   * Start continuous traffic generation
+   * Start continuous traffic generation with FASTER intervals
    */
   static startContinuousGeneration(): void {
-    console.log('Starting continuous traffic generation...');
+    console.log('Starting FAST continuous traffic generation...');
     
-    // Generate traffic every 5 seconds
+    // FASTER vehicle generation: every 3 seconds (was 5)
     setInterval(async () => {
       try {
         await this.generateTrafficPattern();
       } catch (error) {
         console.error('Error in continuous generation:', error);
       }
-    }, 5000);
+    }, 3000); // Every 3 seconds - FASTER
 
-    // Simulate vehicle movement every 2 seconds
+    // FASTER vehicle movement: every 2 seconds (was 2) 
     setInterval(async () => {
       try {
         await this.simulateVehicleMovement();
       } catch (error) {
         console.error('Error in vehicle movement simulation:', error);
       }
-    }, 2000);
+    }, 2000); // Every 2 seconds - MAINTAINED
+
+    console.log('✅ FAST traffic simulation started - Generation: 3s, Movement: 2s');
+  }
+
+  /**
+   * EMERGENCY: Fix negative vehicle counts across all roads
+   */
+  static async fixNegativeVehicleCounts(): Promise<void> {
+    try {
+      console.log('🔧 Fixing negative vehicle counts...');
+      
+      // Find all roads with negative or invalid vehicle counts
+      const roads = await db.road.findMany();
+      
+      for (const road of roads) {
+        if (road.vehicleCount < 0 || isNaN(road.vehicleCount)) {
+          // Count actual vehicles on this road
+          const actualVehicleCount = await db.vehicle.count({
+            where: {
+              roadId: road.id,
+              isMoving: true,
+              exitedAt: null
+            }
+          });
+
+          // Update with correct count
+          await db.road.update({
+            where: { id: road.id },
+            data: {
+              vehicleCount: actualVehicleCount,
+              congestionLevel: Math.max(0, actualVehicleCount / road.maxCapacity)
+            }
+          });
+
+          console.log(`Fixed ${road.name}: was ${road.vehicleCount}, now ${actualVehicleCount}`);
+        }
+      }
+      
+      console.log('✅ Vehicle count fix completed');
+    } catch (error) {
+      console.error('Error fixing vehicle counts:', error);
+      throw error;
+    }
   }
 }
