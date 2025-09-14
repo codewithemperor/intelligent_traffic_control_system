@@ -150,7 +150,7 @@ class TrafficLightService {
           // Force green to yellow after 10 seconds (instead of 20)
           greenLights.forEach(light => {
             const elapsed = (new Date().getTime() - new Date(light.lastChanged).getTime()) / 1000;
-            if (elapsed > 10) { // Changed from 20 to 10 seconds
+            if (elapsed > 20) { // Changed from 20 to 10 seconds
               console.log(`FORCING green to yellow: ${light.road?.name} - ${elapsed.toFixed(1)}s`);
               this.forceYellowTransition(light.id);
             }
