@@ -38,11 +38,12 @@ export async function POST(request: NextRequest) {
       const { DataGenerator } = await import('@/lib/data-generator');
       
       try {
-        await DataGenerator.simulateVehicleMovement();
+        const result = await DataGenerator.simulateVehicleMovement();
         
         return NextResponse.json({
           message: 'Vehicle movement simulation completed',
-          movedVehicles: 'processed'
+          movedVehicles: result.movedVehicles || 0,
+          exitedVehicles: result.exitedVehicles || 0
         });
       } catch (error) {
         console.error('Error in vehicle movement simulation:', error);

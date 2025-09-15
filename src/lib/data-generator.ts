@@ -334,10 +334,10 @@ export class DataGenerator {
   }
 
   /**
-   * FAST vehicle movement and exit - removes vehicles quickly during GREEN lights
-   * Processes every 2 seconds for rapid flow
+   * OPTIMIZED vehicle movement and exit - removes vehicles efficiently during GREEN lights
+   * Processes vehicle movement with batch database operations for better performance
    */
-  static async simulateVehicleMovement(): Promise<void> {
+  static async simulateVehicleMovement(): Promise<{ movedVehicles: number; exitedVehicles: number }> {
     try {
       // Get all active vehicles with road and traffic light info
       const vehicles = await db.vehicle.findMany({
@@ -355,127 +355,153 @@ export class DataGenerator {
         }
       });
 
-      const processedRoads = new Set<string>(); // Track roads we've processed
+      let movedVehicles = 0;
+      let exitedVehicles = 0;
+      
+      // Group vehicles by road for batch processing
+      const vehiclesByRoad = new Map<string, typeof vehicles>();
+      vehicles.forEach(vehicle => {
+        if (vehicle.road) {
+          if (!vehiclesByRoad.has(vehicle.road.id)) {
+            vehiclesByRoad.set(vehicle.road.id, []);
+          }
+          vehiclesByRoad.get(vehicle.road.id)!.push(vehicle);
+        }
+      });
 
-      for (const vehicle of vehicles) {
-        const road = vehicle.road;
+      // Process each road's vehicles
+      for (const [roadId, roadVehicles] of vehiclesByRoad) {
+        const road = roadVehicles[0]?.road;
         if (!road) continue;
 
-        // Find the traffic light for this road
         const trafficLight = road.trafficLights?.[0];
         if (!trafficLight) continue;
 
         const currentTime = new Date();
         const elapsed = (currentTime.getTime() - trafficLight.lastChanged.getTime()) / 1000;
 
-        // GREEN LIGHT: FAST vehicle exit (every 2 seconds during green)
-        if (trafficLight.status === 'GREEN') {
-          // High exit probability during green - vehicles should exit quickly
-          const greenTime = trafficLight.timing?.green || 8;
-          const exitProbability = Math.min(0.8, 0.4 + (elapsed / greenTime) * 0.6); // 40-80% chance
-          
-          if (Math.random() < exitProbability || vehicle.position >= 0.9) {
-            // Vehicle exits the road
-            await db.vehicle.update({
-              where: { id: vehicle.id },
-              data: {
+        // Track vehicle updates for batch operations
+        const vehicleUpdates: Array<{ id: string; position: number; isMoving?: boolean; exitedAt?: Date }> = [];
+        let roadExitCount = 0;
+
+        // Process vehicles on this road
+        for (const vehicle of roadVehicles) {
+          // GREEN LIGHT: Multiple vehicles can exit
+          if (trafficLight.status === 'GREEN') {
+            const greenTime = trafficLight.timing?.green || 8;
+            const exitProbability = Math.min(0.9, 0.5 + (elapsed / greenTime) * 0.4); // 50-90% chance
+            
+            if (Math.random() < exitProbability || vehicle.position >= 0.8) {
+              // Vehicle exits the road
+              vehicleUpdates.push({
+                id: vehicle.id,
+                position: 1.0,
                 isMoving: false,
                 exitedAt: new Date()
-              }
-            });
-
-            // SAFE decrement with verification - only process each road once per cycle
-            if (!processedRoads.has(road.id)) {
-              const currentRoad = await db.road.findUnique({ where: { id: road.id } });
-              if (currentRoad && currentRoad.vehicleCount > 0) {
-                const newVehicleCount = Math.max(0, currentRoad.vehicleCount - 1);
-                const newCongestionLevel = newVehicleCount > 0 ? 
-                  Math.max(0, newVehicleCount / currentRoad.maxCapacity) : 0;
-
-                await db.road.update({
-                  where: { id: road.id },
-                  data: {
-                    vehicleCount: newVehicleCount,
-                    congestionLevel: newCongestionLevel
-                  }
-                });
-
-                console.log(`Vehicle ${vehicle.plateNumber} exited ${road.name} during GREEN - Remaining: ${newVehicleCount}`);
-                processedRoads.add(road.id);
-              }
+              });
+              roadExitCount++;
+              exitedVehicles++;
+            } else {
+              // Vehicle moves forward
+              const newPosition = Math.min(vehicle.position + 0.3, 1.0);
+              vehicleUpdates.push({
+                id: vehicle.id,
+                position: newPosition
+              });
+              movedVehicles++;
             }
-          } else {
-            // Vehicle moves forward but hasn't exited yet
-            const newPosition = Math.min(vehicle.position + 0.4, 1.0); // Faster movement
-            await db.vehicle.update({
-              where: { id: vehicle.id },
-              data: { position: newPosition }
-            });
           }
-        }
-        
-        // YELLOW LIGHT: Some vehicles may exit if close to intersection
-        else if (trafficLight.status === 'YELLOW') {
-          const exitProbability = vehicle.position > 0.7 ? 0.6 : 0.1; // High if close to intersection
           
-          if (Math.random() < exitProbability) {
-            await db.vehicle.update({
-              where: { id: vehicle.id },
-              data: {
+          // YELLOW LIGHT: Some vehicles may exit if close to intersection
+          else if (trafficLight.status === 'YELLOW') {
+            const exitProbability = vehicle.position > 0.7 ? 0.7 : 0.2;
+            
+            if (Math.random() < exitProbability) {
+              vehicleUpdates.push({
+                id: vehicle.id,
+                position: 1.0,
                 isMoving: false,
                 exitedAt: new Date()
-              }
-            });
-
-            if (!processedRoads.has(road.id)) {
-              const currentRoad = await db.road.findUnique({ where: { id: road.id } });
-              if (currentRoad && currentRoad.vehicleCount > 0) {
-                const newVehicleCount = Math.max(0, currentRoad.vehicleCount - 1);
-                const newCongestionLevel = newVehicleCount > 0 ? 
-                  Math.max(0, newVehicleCount / currentRoad.maxCapacity) : 0;
-
-                await db.road.update({
-                  where: { id: road.id },
-                  data: {
-                    vehicleCount: newVehicleCount,
-                    congestionLevel: newCongestionLevel
-                  }
-                });
-
-                console.log(`Vehicle ${vehicle.plateNumber} exited ${road.name} during YELLOW - Remaining: ${newVehicleCount}`);
-                processedRoads.add(road.id);
-              }
+              });
+              roadExitCount++;
+              exitedVehicles++;
+            } else {
+              // Slow movement during yellow
+              const newPosition = Math.min(vehicle.position + 0.08, 1.0);
+              vehicleUpdates.push({
+                id: vehicle.id,
+                position: newPosition
+              });
+              movedVehicles++;
             }
-          } else {
-            // Slow movement during yellow
-            const newPosition = Math.min(vehicle.position + 0.1, 1.0);
-            await db.vehicle.update({
-              where: { id: vehicle.id },
-              data: { position: newPosition }
+          }
+          
+          // RED LIGHT: Vehicles stop and queue up (minimal movement)
+          else if (trafficLight.status === 'RED') {
+            // Very minimal movement during red
+            const newPosition = Math.min(vehicle.position + 0.02, 1.0);
+            vehicleUpdates.push({
+              id: vehicle.id,
+              position: newPosition
             });
+            movedVehicles++;
           }
         }
-        
-        // RED LIGHT: Vehicles stop and queue up (minimal movement)
-        else if (trafficLight.status === 'RED') {
-          // Very minimal movement during red (vehicles creeping forward)
-          const newPosition = Math.min(vehicle.position + 0.05, 1.0);
-          await db.vehicle.update({
-            where: { id: vehicle.id },
-            data: { position: newPosition }
-          });
+
+        // Batch update vehicles
+        if (vehicleUpdates.length > 0) {
+          await Promise.all(
+            vehicleUpdates.map(update => 
+              db.vehicle.update({
+                where: { id: update.id },
+                data: {
+                  position: update.position,
+                  ...(update.isMoving !== undefined && { isMoving: update.isMoving }),
+                  ...(update.exitedAt && { exitedAt: update.exitedAt })
+                }
+              })
+            )
+          );
+        }
+
+        // Update road vehicle count if vehicles exited
+        if (roadExitCount > 0) {
+          const currentRoad = await db.road.findUnique({ where: { id: road.id } });
+          if (currentRoad && currentRoad.vehicleCount > 0) {
+            const newVehicleCount = Math.max(0, currentRoad.vehicleCount - roadExitCount);
+            const newCongestionLevel = newVehicleCount > 0 ? 
+              Math.max(0, newVehicleCount / currentRoad.maxCapacity) : 0;
+
+            await db.road.update({
+              where: { id: road.id },
+              data: {
+                vehicleCount: newVehicleCount,
+                congestionLevel: newCongestionLevel
+              }
+            });
+
+            if (roadExitCount > 0) {
+              console.log(`${roadExitCount} vehicles exited ${road.name} during ${trafficLight.status} - Remaining: ${newVehicleCount}`);
+            }
+          }
         }
       }
 
-      // Clean up old exited vehicles (older than 1 minute)
+      // Clean up old exited vehicles (older than 1 minute) - batch operation
       const oneMinuteAgo = new Date(Date.now() - 60000);
-      await db.vehicle.deleteMany({
+      const deletedCount = await db.vehicle.deleteMany({
         where: {
           exitedAt: {
             lt: oneMinuteAgo
           }
         }
       });
+
+      if (deletedCount.count > 0) {
+        console.log(`Cleaned up ${deletedCount.count} old exited vehicles`);
+      }
+
+      return { movedVehicles, exitedVehicles };
 
     } catch (error) {
       console.error('Error simulating vehicle movement:', error);

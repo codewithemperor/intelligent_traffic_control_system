@@ -17,15 +17,22 @@ import { Play, Pause, RotateCcw, AlertTriangle, Activity, Zap } from 'lucide-rea
 
 export default function Dashboard() {
   const [intersections, setIntersections] = useState<any[]>([]);
-  const [isSimulationRunning, setIsSimulationRunning] = useState(false);
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
-  const [simulationInterval, setSimulationInterval] = useState<NodeJS.Timeout | null>(null);
-  const [vehicleInterval, setVehicleInterval] = useState<NodeJS.Timeout | null>(null);
-  const [vehicleMovementInterval, setVehicleMovementInterval] = useState<NodeJS.Timeout | null>(null);
 
   const { data: trafficData, loading, error, refetch } = useTrafficData();
-  const { socket, connected } = useWebSocket();
+  const { 
+    socket, 
+    connected, 
+    simulationState, 
+    startSimulation, 
+    stopSimulation, 
+    toggleDebug,
+    requestTrafficData,
+    lastVehicleMovement,
+    lastTrafficCycle,
+    lastSystemAlert
+  } = useWebSocket();
 
   // Initialize intersections data
   useEffect(() => {
@@ -34,35 +41,29 @@ export default function Dashboard() {
     }
   }, [trafficData]);
 
-  // Handle WebSocket connections
+  // Handle WebSocket events for real-time updates
   useEffect(() => {
     if (socket) {
-      // Listen for traffic light updates
-      socket.on('traffic-light-changed', (data) => {
-        setIntersections(prev => 
-          prev.map(intersection => ({
-            ...intersection,
-            trafficLights: intersection.trafficLights.map(light => 
-              light.id === data.lightId 
-                ? { ...light, status: data.newStatus, lastChanged: new Date(data.timestamp) }
-                : light
-            )
-          }))
-        );
+      // Listen for traffic data updates
+      socket.on('traffic-data', (data) => {
+        setIntersections(data.intersections);
       });
 
-      // Listen for vehicle count updates
-      socket.on('vehicle-count-changed', (data) => {
-        setIntersections(prev => 
-          prev.map(intersection => ({
-            ...intersection,
-            roads: intersection.roads?.map(road => 
-              road.id === data.roadId 
-                ? { ...road, vehicleCount: data.count, congestionLevel: data.congestionLevel }
-                : road
-            )
-          }))
-        );
+      // Listen for simulation state changes
+      socket.on('simulation-state', (state) => {
+        console.log('Simulation state updated:', state);
+      });
+
+      // Listen for vehicle movement updates
+      socket.on('vehicle-movement-completed', (data) => {
+        // Refresh traffic data to show updated vehicle counts
+        refetch();
+      });
+
+      // Listen for traffic cycle updates
+      socket.on('traffic-cycle-completed', (data) => {
+        // Refresh traffic data to show updated traffic lights
+        refetch();
       });
 
       // Listen for system alerts
@@ -70,40 +71,91 @@ export default function Dashboard() {
         setAlerts(prev => [{ ...data, timestamp: new Date() }, ...prev].slice(0, 10));
       });
 
-      // Listen for performance updates
-      socket.on('performance-updated', (data) => {
-        setSystemStatus(prev => ({ ...prev, ...data }));
+      // Listen for simulation started/stopped
+      socket.on('simulation-started', (data) => {
+        setAlerts(prev => [
+          {
+            type: 'info',
+            message: 'Traffic simulation started via socket',
+            timestamp: new Date()
+          },
+          ...prev
+        ]);
+      });
+
+      socket.on('simulation-stopped', (data) => {
+        setAlerts(prev => [
+          {
+            type: 'warning',
+            message: 'Traffic simulation stopped via socket',
+            timestamp: new Date()
+          },
+          ...prev
+        ]);
       });
     }
 
     return () => {
       if (socket) {
-        socket.off('traffic-light-changed');
-        socket.off('vehicle-count-changed');
+        socket.off('traffic-data');
+        socket.off('simulation-state');
+        socket.off('vehicle-movement-completed');
+        socket.off('traffic-cycle-completed');
         socket.off('system-alert');
-        socket.off('performance-updated');
+        socket.off('simulation-started');
+        socket.off('simulation-stopped');
       }
     };
-  }, [socket]);
+  }, [socket, refetch]);
 
-  // Auto-refresh traffic data every 5 seconds
+  // Handle system alerts from socket
+  useEffect(() => {
+    if (lastSystemAlert) {
+      setAlerts(prev => [{ ...lastSystemAlert, timestamp: new Date() }, ...prev].slice(0, 10));
+    }
+  }, [lastSystemAlert]);
+
+  // Auto-refresh traffic data less frequently since we have real-time updates
   useEffect(() => {
     const interval = setInterval(() => {
-      refetch();
-    }, 5000);
+      if (!simulationState?.isRunning) {
+        refetch();
+      }
+    }, 10000); // Every 10 seconds instead of 5
 
     return () => clearInterval(interval);
-  }, [refetch]);
+  }, [refetch, simulationState]);
 
-  const startSimulation = async () => {
+  // Request initial traffic data when connected
+  useEffect(() => {
+    if (connected && socket) {
+      requestTrafficData();
+    }
+  }, [connected, socket, requestTrafficData]);
+
+  const handleStartSimulation = () => {
+    console.log('🚀 handleStartSimulation called');
+    
+    // Try socket-based simulation first
+    if (connected && socket) {
+      console.log('🚀 Using socket-based simulation');
+      startSimulation();
+    } else {
+      console.log('🚀 Using HTTP-based simulation fallback');
+      // Fallback to HTTP-based simulation
+      startHttpSimulation();
+    }
+  };
+
+  const startHttpSimulation = async () => {
     try {
-      setIsSimulationRunning(true);
+      console.log('🌐 Starting HTTP-based traffic simulation...');
       
       // Add system alert
       setAlerts(prev => [
         {
           type: 'info',
-          message: 'Traffic simulation started',
+          message: 'HTTP traffic simulation started',
           timestamp: new Date()
         },
         ...prev
@@ -121,15 +173,13 @@ export default function Dashboard() {
 
           if (response.ok) {
             const result = await response.json();
-            console.log(`Traffic cycle processed: ${result.updatedIntersections} intersections updated`);
-            refetch(); // Refresh data
+            console.log(`HTTP Traffic cycle processed: ${result.updatedLights} lights updated`);
+            refetch();
           }
         } catch (error) {
-          console.error('Error in traffic cycle:', error);
+          console.error('Error in HTTP traffic cycle:', error);
         }
-      }, 10000); // Every 10 seconds
-
-      setSimulationInterval(cycleInterval);
+      }, 5000);
 
       // Start vehicle generation
       const vehicleGenInterval = setInterval(async () => {
@@ -140,21 +190,19 @@ export default function Dashboard() {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ 
-              count: Math.floor(Math.random() * 3) + 1 // Generate 1-3 vehicles
+              count: Math.floor(Math.random() * 2) + 1 // Generate 1-2 vehicles
             }),
           });
 
           if (response.ok) {
             const result = await response.json();
-            console.log(`Generated ${result.vehicles.length} vehicles`);
-            refetch(); // Refresh data
+            console.log(`HTTP Generated ${result.vehicles.length} vehicles`);
+            refetch();
           }
         } catch (error) {
-          console.error('Error in vehicle generation:', error);
+          console.error('Error in HTTP vehicle generation:', error);
         }
-      }, 5000); // Every 5 seconds
-
-      setVehicleInterval(vehicleGenInterval);
+      }, 8000);
 
       // Start vehicle movement simulation
       const vehicleMovementInterval = setInterval(async () => {
@@ -171,56 +219,69 @@ export default function Dashboard() {
 
           if (response.ok) {
             const result = await response.json();
-            console.log(`Vehicle movement processed: ${result.movedVehicles || 0} vehicles moved`);
-            refetch(); // Refresh data
+            console.log(`HTTP Vehicle movement: ${result.movedVehicles || 0} moved, ${result.exitedVehicles || 0} exited`);
+            refetch();
           }
         } catch (error) {
-          console.error('Error in vehicle movement:', error);
+          console.error('Error in HTTP vehicle movement:', error);
         }
-      }, 3000); // Every 3 seconds
+      }, 2000);
 
-      // Store the vehicle movement interval
-      setVehicleMovementInterval(vehicleMovementInterval);
+      // Store intervals (we'll need to manage these differently)
+      (window as any).httpSimulationIntervals = {
+        cycle: cycleInterval,
+        vehicleGen: vehicleGenInterval,
+        vehicleMovement: vehicleMovementInterval
+      };
+
+      console.log('✅ HTTP simulation started');
 
     } catch (error) {
-      console.error('Error starting simulation:', error);
-      setIsSimulationRunning(false);
+      console.error('Error starting HTTP simulation:', error);
     }
   };
 
-  const stopSimulation = () => {
-    setIsSimulationRunning(false);
+  const handleStopSimulation = () => {
+    console.log('🛑 handleStopSimulation called');
     
-    // Clear intervals
-    if (simulationInterval) {
-      clearInterval(simulationInterval);
-      setSimulationInterval(null);
+    // Try socket-based stop first
+    if (connected && socket) {
+      console.log('🛑 Using socket-based stop');
+      stopSimulation();
+    } else {
+      console.log('🛑 Using HTTP-based stop fallback');
+      stopHttpSimulation();
     }
-    
-    if (vehicleInterval) {
-      clearInterval(vehicleInterval);
-      setVehicleInterval(null);
-    }
+  };
 
-    if (vehicleMovementInterval) {
-      clearInterval(vehicleMovementInterval);
-      setVehicleMovementInterval(null);
+  const stopHttpSimulation = () => {
+    console.log('🛑 Stopping HTTP-based traffic simulation...');
+    
+    const intervals = (window as any).httpSimulationIntervals;
+    if (intervals) {
+      if (intervals.cycle) clearInterval(intervals.cycle);
+      if (intervals.vehicleGen) clearInterval(intervals.vehicleGen);
+      if (intervals.vehicleMovement) clearInterval(intervals.vehicleMovement);
+      delete (window as any).httpSimulationIntervals;
     }
     
-    // Add system alert
     setAlerts(prev => [
       {
         type: 'warning',
-        message: 'Traffic simulation stopped',
+        message: 'HTTP traffic simulation stopped',
         timestamp: new Date()
       },
       ...prev
     ]);
   };
 
-  const resetSimulation = async () => {
+  const handleResetSimulation = async () => {
     try {
-      stopSimulation();
+      // Stop both socket and HTTP simulations
+      if (connected && socket) {
+        stopSimulation();
+      }
+      stopHttpSimulation();
       
       await Promise.all(
         intersections.map(intersection => 
@@ -237,7 +298,7 @@ export default function Dashboard() {
         )
       );
 
-      refetch(); // Refresh data
+      refetch();
 
       setAlerts(prev => [
         {
@@ -382,8 +443,8 @@ export default function Dashboard() {
               
               <div className="flex space-x-2">
                 <Button
-                  onClick={startSimulation}
-                  disabled={isSimulationRunning}
+                  onClick={handleStartSimulation}
+                  disabled={simulationState?.isRunning}
                   size="sm"
                   className="flex items-center space-x-2"
                 >
@@ -392,8 +453,8 @@ export default function Dashboard() {
                 </Button>
                 
                 <Button
-                  onClick={stopSimulation}
-                  disabled={!isSimulationRunning}
+                  onClick={handleStopSimulation}
+                  disabled={!simulationState?.isRunning}
                   variant="outline"
                   size="sm"
                   className="flex items-center space-x-2"
@@ -403,13 +464,32 @@ export default function Dashboard() {
                 </Button>
                 
                 <Button
-                  onClick={resetSimulation}
+                  onClick={handleResetSimulation}
+                  disabled={simulationState?.isRunning}
                   variant="outline"
                   size="sm"
                   className="flex items-center space-x-2"
                 >
                   <RotateCcw className="h-4 w-4" />
                   <span>Reset</span>
+                </Button>
+
+                <Button
+                  onClick={() => {
+                    console.log('🧪 Testing socket connection...');
+                    console.log('Socket exists:', !!socket);
+                    console.log('Connected:', connected);
+                    console.log('Simulation state:', simulationState);
+                    if (socket) {
+                      console.log('Socket emit test...');
+                      socket.emit('test', { message: 'Hello from client' });
+                    }
+                  }}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center space-x-2"
+                >
+                  <span>Test Socket</span>
                 </Button>
               </div>
             </div>
