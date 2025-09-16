@@ -1,6 +1,9 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,162 +13,49 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Intersection {
-  id          String   @id @default(cuid())
-  name        String   // e.g., "Main Gate Junction", "Library Intersection"
-  location    String   // Road intersection name
-  isActive    Boolean  @default(true)
-  priority    Int      @default(1)
-  algorithm   Algorithm @default(ADAPTIVE)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  trafficLights TrafficLight[]
-  roads       Road[]
-  sensors     Sensor[]
-  logs        TrafficLog[]
-}
+model Junction {
+  id        String   @id @default(cuid())
+  name      String
+  location  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-model TrafficLight {
-  id          String   @id @default(cuid())
-  intersectionId String
-  roadId      String
-  direction   Direction // Direction this traffic light controls
-  status      Status   @default(RED)
-  timing      Json     // {red: 30, yellow: 5, green: 25, cycle: 60}
-  isActive    Boolean  @default(true)
-  lastChanged DateTime @default(now())
-  totalCycles Int      @default(0)
-  currentCycleTime Int @default(0) // Current time in cycle (for countdown)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  intersection Intersection @relation(fields: [intersectionId], references: [id])
-  road        Road       @relation(fields: [roadId], references: [id])
-  sensors     Sensor[]
-  logs        TrafficLog[]
+  roads Road[]
 }
 
 model Road {
-  id            String      @id @default(cuid())
-  name          String      // e.g., "Main Road North", "Campus Drive East"
-  direction     Direction
-  vehicleCount  Int         @default(0)
-  maxCapacity   Int         @default(50)
-  intersectionId String     // Each road belongs to an intersection
-  isActive      Boolean     @default(true)
-  congestionLevel Float     @default(0.0) // 0.0 to 1.0
-  averageSpeed  Float       @default(30.0) // km/h
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  
-  intersection  Intersection @relation(fields: [intersectionId], references: [id])
-  vehicles      Vehicle[]
-  trafficLights TrafficLight[]
-  sensors       Sensor[]
+  id           String    @id @default(cuid())
+  name         String
+  direction    Direction
+  vehicleCount Int       @default(0)
+  maxCapacity  Int       @default(50)
+  junctionId   String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  junction     Junction      @relation(fields: [junctionId], references: [id])
+  trafficLight TrafficLight?
 }
 
-model Vehicle {
-  id          String   @id @default(cuid())
-  plateNumber String   // Auto-generated Nigerian format
-  type        VehicleType @default(CAR)
-  roadId      String
-  speed       Float    @default(0.0)
-  position    Float    @default(0.0) // 0.0 to 1.0 (position on road)
-  isMoving    Boolean  @default(false)
-  priority    Int      @default(1) // 1=normal, 2=emergency
-  enteredAt   DateTime @default(now())
-  exitedAt    DateTime?
-  
-  road        Road     @relation(fields: [roadId], references: [id])
-}
+model TrafficLight {
+  id       String @id @default(cuid())
+  roadId   String @unique
+  status   Status @default(RED)
+  timing   Json // {red: 30, yellow: 5, green: 25}
+  priority Int    @default(1)
 
-model Sensor {
-  id            String      @id @default(cuid())
-  name          String
-  type          SensorType
-  roadId        String?
-  trafficLightId String?
-  intersectionId String?
-  isActive      Boolean     @default(true)
-  sensitivity   Float       @default(1.0)
-  lastReading   Float       @default(0.0)
-  createdAt     DateTime    @default(now())
-  
-  road          Road?        @relation(fields: [roadId], references: [id])
-  trafficLight  TrafficLight? @relation(fields: [trafficLightId], references: [id])
-  intersection  Intersection? @relation(fields: [intersectionId], references: [id])
-  readings      SensorReading[]
-}
-
-model SensorReading {
-  id          String   @id @default(cuid())
-  sensorId    String
-  value       Float    // Vehicle count or density
-  vehicleCount Int     @default(0)
-  avgSpeed    Float    @default(0.0)
-  timestamp   DateTime @default(now())
-  
-  sensor      Sensor   @relation(fields: [sensorId], references: [id])
-}
-
-model TrafficLog {
-  id            String       @id @default(cuid())
-  intersectionId String
-  trafficLightId String
-  action        String       // "CYCLE_CHANGE", "MANUAL_OVERRIDE", "EMERGENCY"
-  previousState Status
-  newState      Status
-  reason        String       // Algorithm decision reason
-  vehicleCount  Int          @default(0)
-  efficiency    Float?       // 0.0 to 1.0
-  waitTime      Int?         // Average wait time in seconds
-  timestamp     DateTime     @default(now())
-  
-  intersection  Intersection @relation(fields: [intersectionId], references: [id])
-  trafficLight  TrafficLight @relation(fields: [trafficLightId], references: [id])
+  road Road @relation(fields: [roadId], references: [id])
 }
 
 enum Status {
   RED
   YELLOW
   GREEN
-  FLASHING_RED
-  FLASHING_YELLOW
-  MAINTENANCE
 }
 
 enum Direction {
   NORTH
   SOUTH
   EAST
-  WEST
-  NORTHEAST
-  NORTHWEST
-  SOUTHEAST
-  SOUTHWEST
-}
-
-enum VehicleType {
-  CAR
-  BUS
-  MOTORCYCLE
-  TRUCK
-  EMERGENCY
-  BICYCLE
-}
-
-enum SensorType {
-  PRESSURE
-  INFRARED
-  CAMERA
-  RADAR
-  LOOP_DETECTOR
-}
-
-enum Algorithm {
-  FIXED        // Fixed timing
-  ADAPTIVE     // Based on vehicle count
-  AI_OPTIMIZED // Machine learning
-  EMERGENCY    // Emergency override
 }

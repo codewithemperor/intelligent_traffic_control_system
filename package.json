@@ -1,5 +1,5 @@
 {
-  "name": "intelligent-traffic-control-system",
+  "name": "nextjs_tailwind_shadcn_ts",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed/index.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

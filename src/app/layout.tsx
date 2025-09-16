@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+import { Providers } from "@/components/providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,16 +20,9 @@ export const metadata: Metadata = {
   keywords: ["Next.js", "TypeScript", "Tailwind CSS", "shadcn/ui", "AI development", "React"],
   authors: [{ name: "Sulaimon Yusuf" }],
   openGraph: {
-    title: "Sulaimon Yusuf",
-    description: "Intelligent Traffic Control System",
-    url: "https://codewithemperor@github.io",
-    siteName: "codewithemperor",
+    title: "Traffic Control System",
+    description: "Monitor and control traffic flow at Adeseun Ogundoyin Polytechnic",
     type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "Codewithemperor",
-    description: "Intelligent Traffic Control System",
   },
 };
 
@@ -42,8 +36,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        {children}
-        <Toaster />
+        <Providers>
+          {children}
+          <Toaster />
+        </Providers>
       </body>
     </html>
   );
