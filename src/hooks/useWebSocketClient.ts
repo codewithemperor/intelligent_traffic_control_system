@@ -45,7 +45,7 @@ export const useWebSocket = (url?: string): UseTrafficSocketResult => {
     const connectWebSocket = () => {
       try {
         console.log('🔌 Attempting to connect WebSocket...');
-        const connectUrl = url || 'http://localhost:3001';
+        const connectUrl =  process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
         console.log('🔌 Connecting to:', connectUrl);
         
         // Import socket.io-client dynamically
@@ -75,7 +75,7 @@ export const useWebSocket = (url?: string): UseTrafficSocketResult => {
           });
 
           socketInstance.on('connect_error', (err: any) => {
-            console.error('WebSocket connection error:', err);
+            console.error('WebSocket connection error 1:', err);
             setConnected(false);
             setError('Connection failed');
           });

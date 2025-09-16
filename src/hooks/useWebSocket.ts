@@ -9,7 +9,7 @@ export const useWebSocket = (url?: string) => {
 
   useEffect(() => {
     // Initialize socket connection
-    const socketInstance = io(url || process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001', {
+    const socketInstance = io(process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001', {
       path: '/api/socket',
       transports: ['websocket', 'polling']
     });
@@ -25,7 +25,7 @@ export const useWebSocket = (url?: string) => {
     });
 
     socketInstance.on('connect_error', (error) => {
-      console.error('WebSocket connection error:', error);
+      console.error('WebSocket connection error 2:', error);
       setConnected(false);
     });
 
