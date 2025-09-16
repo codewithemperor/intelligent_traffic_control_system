@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Status, Direction } from '@/types/traffic';
 import { TrafficLight } from './TrafficLight';
@@ -25,6 +25,15 @@ export const TrafficIntersection: React.FC<TrafficIntersectionProps> = ({
   const { id, name, location, isActive, algorithm, priority, trafficLights = [], roads = [] } = intersection;
   const { calculateTrafficLightCountdown } = useCountdown();
   const [countdowns, setCountdowns] = useState<{ [key: string]: number }>({});
+
+  // Sort arrays by ID to maintain consistent order
+  const sortedTrafficLights = useMemo(() => {
+    return [...trafficLights].sort((a, b) => a.id.localeCompare(b.id));
+  }, [trafficLights]);
+
+  const sortedRoads = useMemo(() => {
+    return [...roads].sort((a, b) => a.id.localeCompare(b.id));
+  }, [roads]);
 
   // Update countdowns every second
   useEffect(() => {
@@ -119,13 +128,14 @@ export const TrafficIntersection: React.FC<TrafficIntersectionProps> = ({
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-center">Traffic Lights</h3>
               <div className="grid grid-cols-2 gap-4">
-                {trafficLights.map((light: any) => (
+                {sortedTrafficLights.map((light: any) => (
                   <motion.div
-                    key={light.id}
+                    key={`traffic-light-${light.id}`} // Stable unique key
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.3 }}
                     className="flex flex-col items-center"
+                    layout // Add layout prop to prevent position jumps
                   >
                     <TrafficLight
                       id={light.id}
@@ -158,15 +168,16 @@ export const TrafficIntersection: React.FC<TrafficIntersectionProps> = ({
             <div className="space-y-4">
               <h3 className="text-lg font-semibold">Roads & Traffic</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {roads.map((road: any) => {
+                {sortedRoads.map((road: any) => {
                   const correspondingLight = trafficLights.find((light: any) => light.roadId === road.id);
                   return (
                     <motion.div
-                      key={road.id}
+                      key={`road-${road.id}`} // Stable unique key
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.3 }}
                       className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border border-gray-200 dark:border-gray-700"
+                      layout // Add layout prop to prevent position jumps
                     >
                       <div className="flex justify-between items-center mb-3">
                         <div className="flex items-center gap-2">
