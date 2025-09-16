@@ -49,7 +49,7 @@ class TrafficLightService {
       } catch (error) {
         console.error('❌ Error in traffic light service:', error);
       }
-    }, 3000);
+    }, 8000);
 
     // SLOWER vehicle generation: every 8 seconds (was 5)
     this.vehicleGenerationInterval = setInterval(async () => {
@@ -82,7 +82,7 @@ class TrafficLightService {
       } catch (error) {
         console.error('❌ Error in vehicle generation:', error);
       }
-    }, 8000); // Every 8 seconds - SLOWER generation
+    }, 4000); // Every 3 seconds - SLOWER generation
 
     // FASTER vehicle movement: every 50ms (was 100ms)
     this.vehicleMovementInterval = setInterval(async () => {
@@ -106,7 +106,7 @@ class TrafficLightService {
       } catch (error) {
         console.error('❌ Error in vehicle movement:', error);
       }
-    }, 50); // Every 50ms - MUCH FASTER movement
+    }, 500); // Every 50ms - MUCH FASTER movement
 
     console.log('✅ Traffic service started - Lights: 3s, Gen: 8s (slower), Move: 50ms (faster)');
   }

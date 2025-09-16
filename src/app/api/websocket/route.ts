@@ -18,9 +18,12 @@ const SocketHandler = (req: NextApiResponseServerIO, res: any) => {
     const io = new ServerIO(res.socket.server, {
       path: '/api/socket',
       cors: {
-        origin: process.env.NODE_ENV === 'production' ? false : ['http://localhost:3001'],
+        origin: process.env.NODE_ENV === 'production'
+          ? process.env.NEXT_PUBLIC_BASE_URL
+          : ['http://localhost:3001'],
         methods: ['GET', 'POST']
       }
+
     });
     
     res.socket.server.io = io;

@@ -61,7 +61,7 @@ export class TrafficAlgorithms {
     
     const timing = {
       red: Math.max(15 - vehicleCount, 8), // Shorter red for busy roads, min 8s
-      yellow: 3, // Fixed yellow time
+      yellow: 2, // Fixed yellow time
       green: greenTime,
       cycle: 0
     };
